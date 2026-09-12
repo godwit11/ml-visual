@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>降维技术（PCA）· 奇迹学习</title>
+    <meta
+      name="description"
+      content="PCA 怎么找到信息量最大的那个方向：亲手转动坐标轴，看方差如何被一根根主成分吃掉，也看标准化怎么把主成分换一个人。"
+    />
+    <link rel="canonical" href="https://www.godwit.asia/demos/pca/" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="奇迹学习" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:url" content="https://www.godwit.asia/demos/pca/" />
+    <meta property="og:title" content="降维技术（PCA）· 奇迹学习" />
+    <meta
+      property="og:description"
+      content="PCA 怎么找到信息量最大的那个方向：亲手转动坐标轴，看方差如何被一根根主成分吃掉，也看标准化怎么把主成分换一个人。"
+    />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <nav class="nav">
+      <a class="nav-brand" href="../../"><span class="dot"></span>奇迹学习</a>
+      <span class="nav-spacer"></span>
+      <div class="nav-links"><a href="../../#demos">全部演示</a></div>
+      <button class="theme-toggle" data-theme-toggle aria-label="切换深浅色主题"></button>
+    </nav>
+
+    <div class="container">
+      <div class="page-head">
+        <div class="crumb"><a href="../../">首页</a> / 无监督学习 / 降维技术</div>
+        <h1>降维：把四个特征压成两个，凭什么不心疼</h1>
+        <p>
+          PCA 做的事情只有一句：<strong>找一根轴，让数据在它上面的投影尽量散开</strong>。
+          找到第一根，再找跟它垂直的第二根里最散的，依此类推。
+          它之所以敢丢维度，是因为数据常常<strong>本来就没占满整个空间</strong>——
+          四个特征都在描述「花有多大」，那就没必要留四份。
+          这一页可以亲手转轴：看在哪一个角度，投影的方差到了最大。
+        </p>
+      </div>
+
+      <div class="demo-layout">
+        <div>
+          <div class="panel">
+            <div class="panel-title">原始空间：主成分方向与投影</div>
+            <div class="chart" id="chart-space"></div>
+            <div class="ctrl-hint" style="margin-top: 8px" id="space-hint"></div>
+          </div>
+
+          <div class="chart-row" style="margin-top: var(--sp-4)">
+            <div class="panel">
+              <div class="panel-title">方差谱：每一根主成分吃掉了多少信息</div>
+              <div class="chart-sm" id="chart-scree" style="height: 300px"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-title">降到 k 维之后</div>
+              <div class="metric-grid" id="metrics"></div>
+              <div class="ctrl-hint" id="train-status" style="margin-top: 10px"></div>
+            </div>
+          </div>
+
+          <div class="panel" data-tabs style="margin-top: var(--sp-4)">
+            <div class="tab-bar">
+              <button class="tab is-active" data-tab="code">代码</button>
+              <button class="tab" data-tab="theory">原理</button>
+              <button class="tab" data-tab="quiz">思考题</button>
+            </div>
+
+            <div class="tab-panel is-active" data-panel="code">
+              <div class="code-wrap" style="position: relative">
+                <pre class="code-block" id="code"></pre>
+                <button class="copy-btn" data-copy>复制</button>
+              </div>
+              <div class="callout callout-info" style="margin-top: 16px">
+                这一页的 PCA 是自己实现的——中心化、对称矩阵的 <strong>Jacobi 特征分解</strong>、
+                SVD、投影、逆变换全是手写，没有用任何线性代数库。
+                主成分方向 / 解释方差比 / 投影坐标 / 重构误差都与 sklearn 的
+                <span class="math" data-tex="\text{PCA}(svd\_solver='full')"></span> 逐项对拍过。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="theory">
+              <h3 style="font-size: 15px; margin-bottom: 8px">① 它在找什么：一根"最散"的轴</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                把数据投影到某个单位方向 <span class="math" data-tex="w"></span> 上，
+                投影后的一维数据有多散，用方差衡量。PCA 要的就是让这个方差最大的
+                <span class="math" data-tex="w"></span>：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="w_1 = \arg\max_{\|w\|=1} \frac{1}{n-1}\sum_{i=1}^{n}\big(w^\top (x_i-\bar x)\big)^2"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                这个最大化问题有闭式解：把数据写成矩阵并做中心化
+                <span class="math" data-tex="X_c"></span>，最优方向就是
+                <span class="math" data-tex="\text{Cov}=\frac{X_c^\top X_c}{n-1}"></span>
+                的<strong>最大特征值对应的特征向量</strong>。第二根轴则在"与第一根垂直"的
+                约束下重复同一件事——所以主成分天然两两正交。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">② 为什么用 SVD 而不是协方差矩阵</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                数学上两者等价：<span class="math" data-tex="X_c = U S V^\top"></span> 时，
+                <span class="math" data-tex="\text{Cov}"></span> 的特征值正是
+                <span class="math" data-tex="s_j^2/(n-1)"></span>，
+                特征向量正是 <span class="math" data-tex="V"></span> 的列。但数值上不等价：
+              </p>
+              <p style="font-size: 13px; color: var(--text-2)">
+                先组协方差矩阵，等于把奇异值<strong>平方</strong>了一遍
+                （<span class="math" data-tex="\sigma \to \sigma^2"></span>），
+                条件数从 <span class="math" data-tex="\kappa"></span> 变成
+                <span class="math" data-tex="\kappa^2"></span>。
+                当矩阵本身接近奇异时，最小的那几根轴会丢精度甚至变成负数。
+                所以 sklearn 默认走 SVD——这一页也走 SVD，
+                只在求 <span class="math" data-tex="V"></span> 的那一步用到了
+                对称矩阵的特征分解。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">③ 中心化，但不要随便标准化</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                sklearn 的 PCA <strong>只做中心化（减均值），不做标准化</strong>。
+                这不是疏忽，是刻意的：标准化与否给出的是<strong>两个不同的问题</strong>。
+              </p>
+              <p style="font-size: 13px; color: var(--text-2)">
+                把页面的数据集切到「鸢尾花（标准化后）」对比一下，
+                第 1 主成分从 92.5% 掉到 73.0%。更狠的是那个诊断实验：
+                只把「萼片长」的单位从厘米换成 0.1 毫米（数字乘 100，
+                物理含义完全没变），第 1 主成分占比立刻从 92.5% 飙到
+                <strong>99.98%</strong>，方向也变成几乎只指着萼片长。
+              </p>
+              <div class="callout callout-tip" style="margin: 12px 0">
+                <strong>所以：量纲不统一时必须标准化</strong>（比如"收入（元）"和"年龄（岁）"）；
+                <strong>量纲本来就统一时不要标准化</strong>（比如四个都是厘米），
+                否则会把"哪个特征更重要"这个信息也一起抹掉。
+              </div>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">④ 丢掉的那部分去哪了</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                保留前 k 个主成分，等价于把数据<strong>正交投影</strong>到一个 k 维子空间上，
+                被丢掉的部分正是垂直于该子空间的分量。丢掉的方差等于
+                <span class="math" data-tex="\sum_{j>k}\lambda_j"></span>，
+                所以"累计解释方差比"就是"信息保住了多少"。
+              </p>
+              <p style="font-size: 13px; color: var(--text-2)">
+                但要注意：<strong>保住方差 ≠ 保住结构</strong>。
+                右侧「近邻保持」那一项才是更贴近实际用途的指标——
+                降维后原本挨得近的点，有多少还挨着。
+              </p>
+            </div>
+
+            <div class="tab-panel" data-panel="quiz">
+              <details class="quiz">
+                <summary>1. 主成分的方向为什么可以整体取反？这算不算"两个答案"？</summary>
+                <div class="quiz-body">
+                  不算。特征向量 <span class="math" data-tex="v"></span> 与
+                  <span class="math" data-tex="-v"></span> 是同一条直线的两个方向，
+                  投影到它上面得到的方差完全一样——<strong>轴上没有"正反"这回事</strong>。
+                  所以对拍时不能直接比数值，得先对齐符号（本页对拍脚本就是这么做的）。
+                  真正唯一的是**子空间**（那根轴），不是轴上的朝向。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>2. 页面上把 k 从 4 调到 1，方差只丢了 7.5%，是不是说我随便丢三个特征也行？</summary>
+                <div class="quiz-body">
+                  不行，这是两件不同的事。<br/>
+                  <strong>丢掉整个特征</strong>：比如"花瓣宽"整个不用了，
+                  那么这一列里的所有信息（包括它和其他特征不共享的那部分）全没了。<br/>
+                  <strong>丢主成分</strong>：丢掉的是"所有特征共同构成的某个方向"，
+                  剩下的主成分里，<strong>每个原始特征都还留着一部分</strong>。<br/>
+                  鸢尾花的例子最能说明问题：第 4 个主成分只占 0.52% 的方差，
+                  但它几乎只由「花瓣宽」的独特成分构成
+                  （方向是 <span class="math" data-tex="(+0.32,-0.32,-0.48,+0.75)"></span>）。
+                  丢它损失的确很小——但那 0.52% 是别处拿不回来的。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>3. 「不相关二维数据」那组，两个主成分占比 58.9% : 41.1%，这说明什么？</summary>
+                <div class="quiz-body">
+                  说明这组数据<strong>没有可压缩的空间</strong>。
+                  两块都是圆的、方差差不多，"降成一维"无论怎么选轴都要丢掉四成信息。
+                  PCA 的能力上限是数据本身给的：<strong>只有当特征之间有冗余（相关性强）时，
+                  降维才几乎不心疼</strong>。翻回「相关二维数据」那组看看——
+                  98.3% : 1.7%，降到一维只丢 1.7%。这两组并排放着，
+                  就是"降维凭什么有效"最直白的答案。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>4. 既然保留 100% 方差就是原数据，那 PCA 和"什么都不做"有什么区别？</summary>
+                <div class="quiz-body">
+                  区别在于：即使保留全部维度，PCA 也**换了一套坐标**。
+                  新坐标系里轴的顺序是"按信息量排的"，而且新轴之间两两不相关
+                  （协方差矩阵是对角阵）。<br/>
+                  这两条本身就有用：① 想知道"哪几根轴重要"，看方差谱就行；
+                  ② 有些算法（比如需要求逆的线性模型）很怕特征相关，
+                  换成主成分坐标系会稳得多。所以 PCA 的价值不止"变少"，还有"变正交"。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>5. PCA 是有监督还是无监督？它会看标签吗？</summary>
+                <div class="quiz-body">
+                  <strong>无监督</strong>——整个推导里没有出现过标签，
+                  它只在意"数据散得开不开"。这是它的局限所在：
+                  如果某个方向方差很小但恰好是区分类别的关键，
+                  PCA 会毫不犹豫地把它丢掉。<br/>
+                  这一页的鸢尾花是个幸运的例子：setosa 那一簇在前两个主成分上分得很开，
+                  所以降维之后分类依然容易。真想"沿着对分类有用的方向"降维，
+                  得换 <strong>LDA</strong>（线性判别分析）——它用了标签，
+                  目标是"类间散度大、类内散度小"。
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <aside>
+          <div class="panel">
+            <div class="panel-title">降维设置</div>
+
+            <div class="field">
+              <label for="sel-data">数据集</label>
+              <select id="sel-data" class="select"></select>
+            </div>
+
+            <div class="field" style="margin-top: 12px">
+              <label for="sel-pair">主图上看哪两个维度</label>
+              <select id="sel-pair" class="select"></select>
+            </div>
+
+            <div class="stack" id="controls" style="margin-top: 12px"></div>
+
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px">
+              <button class="btn btn-primary" id="btn-snap">对准 PC1</button>
+              <button class="btn" id="btn-optimal">最佳 k</button>
+              <button class="btn" id="btn-reset">重置</button>
+            </div>
+
+            <div class="callout callout-tip" id="data-desc" style="margin-top: 14px"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">使用说明</div>
+            <ol style="font-size: 13px; color: var(--text-2); margin: 0; padding-left: 1.2em">
+              <li>拖「旋转角」转那根轴，看左边投影的散点什么时候最宽。</li>
+              <li>盯「投影方差」：它在 PC1 的角度上达到最大——这就是 PCA 的定义。</li>
+              <li>切到「不相关二维数据」，怎么转都散不开：没有冗余就没法压。</li>
+              <li>对比「鸢尾花」和「鸢尾花（标准化后）」，看主成分被换成了谁。</li>
+            </ol>
+          </div>
+        </aside>
+      </div>
+
+      <div class="pager" id="pager"></div>
+    </div>
+
+    <footer class="footer">
+      <p>
+        可视化 ECharts · 公式 KaTeX · PCA 手写实现（Jacobi 特征分解 + SVD，无第三方线代库），
+        主成分方向 / 解释方差比 / 投影坐标 / 重构误差已在 5 个数据集上与 scikit-learn 逐项对拍 ·
+        鸢尾花数据来自 sklearn.datasets
+      </p>
+    </footer>
+
+    <script type="module" src="../../src/pages/pca.ts"></script>
+  </body>
+</html>

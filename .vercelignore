@@ -1,0 +1,25 @@
+# 用 Vercel CLI（npx vercel --prod）上传时生效；
+# 走 Git 仓库自动部署时这份文件不参与，由 .gitignore 决定上传内容。
+
+node_modules
+dist
+.vite
+
+# 本地对拍用的 Python 环境与脚本产物
+.venv-python
+**/__pycache__
+*.pyc
+
+# Vite 临时文件
+*.timestamp-*.mjs
+
+# 开发期自测页（vite.config.ts 已排除出生产构建）
+demos/_selftest
+
+# 编辑器 / 系统
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+*.log

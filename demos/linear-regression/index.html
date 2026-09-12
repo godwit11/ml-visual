@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>线性回归 · 奇迹学习</title>
+    <meta name="description" content="拖动斜率和截距，实时看误差怎么变，再对比最小二乘给出的最优解。" />
+    <link rel="canonical" href="https://www.godwit.asia/demos/linear-regression/" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="奇迹学习" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:url" content="https://www.godwit.asia/demos/linear-regression/" />
+    <meta property="og:title" content="线性回归 · 奇迹学习" />
+    <meta property="og:description" content="拖动斜率和截距，实时看误差怎么变，再对比最小二乘给出的最优解。" />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <nav class="nav">
+      <a class="nav-brand" href="../../"><span class="dot"></span>奇迹学习</a>
+      <span class="nav-spacer"></span>
+      <div class="nav-links"><a href="../../#demos">全部演示</a></div>
+      <button class="theme-toggle" data-theme-toggle aria-label="切换深浅色主题"></button>
+    </nav>
+
+    <div class="container">
+      <div class="page-head">
+        <div class="crumb"><a href="../../">首页</a> / 基础与评估 / 线性回归</div>
+        <h1>线性回归：手动调参 vs 最小二乘</h1>
+        <p>
+          数据来自 Boston Housing 的 506 条真实记录：横轴是平均房间数
+          <code>rm</code>，纵轴是房价中位数 <code>medv</code>（千美元）。
+        </p>
+      </div>
+
+      <div class="demo-layout">
+        <div>
+          <div class="panel">
+            <div class="panel-title">房间数与房价</div>
+            <div class="chart" id="chart"></div>
+          </div>
+
+          <div class="panel" data-tabs>
+            <div class="tab-bar">
+              <button class="tab is-active" data-tab="code">代码</button>
+              <button class="tab" data-tab="theory">原理</button>
+              <button class="tab" data-tab="quiz">思考题</button>
+            </div>
+
+            <div class="tab-panel is-active" data-panel="code">
+              <div class="code-wrap" style="position: relative">
+                <pre class="code-block" id="code"></pre>
+                <button class="copy-btn" data-copy>复制</button>
+              </div>
+              <div class="callout callout-info" style="margin-top: 16px">
+                滑杆或数字框里调出来的值，会实时同步到上面第 ① 段。第 ② 段是同一个模型用
+                sklearn 的写法——这就是"玩"和"写"之间的那座桥。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="theory">
+              <h3 style="font-size: 15px; margin-bottom: 8px">模型与损失函数</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                一元线性回归假设输出是输入的线性组合：
+              </p>
+              <span class="math" data-display data-tex="\hat{y} = w x + b"></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                最小二乘（OLS）要找的是让残差平方和最小的那一组参数：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="\min_{w,b}\ J(w,b) = \sum_{i=1}^{n}\left(y_i - \hat{y}_i\right)^2"
+              ></span>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">闭式解</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                对 <span class="math" data-tex="w"></span> 和
+                <span class="math" data-tex="b"></span> 分别求偏导并令其为 0，可以直接解出来，不需要迭代：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="w = \frac{\sum_{i=1}^{n}(x_i-\bar{x})(y_i-\bar{y})}{\sum_{i=1}^{n}(x_i-\bar{x})^2}, \qquad b = \bar{y} - w\bar{x}"
+              ></span>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">三个误差指标</h3>
+              <span class="math" data-display data-tex="\mathrm{MAE} = \frac{1}{n}\sum_{i=1}^{n}\left|y_i - \hat{y}_i\right|"></span>
+              <span class="math" data-display data-tex="\mathrm{MSE} = \frac{1}{n}\sum_{i=1}^{n}\left(y_i - \hat{y}_i\right)^2"></span>
+              <span
+                class="math"
+                data-display
+                data-tex="R^2 = 1 - \frac{SS_{\text{res}}}{SS_{\text{tot}}} = 1 - \frac{\sum (y_i-\hat{y}_i)^2}{\sum (y_i-\bar{y})^2}"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                MAE 是线性惩罚，MSE 对大误差平方放大，所以 MSE 对离群点敏感得多。
+                <span class="math" data-tex="R^2"></span> 的含义是"比直接用均值瞎猜好多少"，1 为完美，0
+                等于瞎猜，负数说明还不如猜均值。
+              </p>
+              <div class="callout callout-tip" style="margin-top: 16px">
+                <strong>关于这份数据：</strong>Boston Housing 是教学经典数据集，但它本身带有已知的伦理争议；
+                这里我们只用「房间数 → 房价」这一对变量做回归演示，不涉及其中任何敏感变量。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="quiz">
+              <details class="quiz">
+                <summary>1. 为什么最优的那条直线一定经过点 (x̄, ȳ)？</summary>
+                <div class="quiz-body">
+                  对 <span class="math" data-tex="b"></span> 求偏导：
+                  <span class="math" data-tex="\frac{\partial J}{\partial b} = -2\sum (y_i - wx_i - b) = 0"></span>，
+                  整理得 <span class="math" data-tex="b = \bar{y} - w\bar{x}"></span>。
+                  代回模型，当 <span class="math" data-tex="x = \bar{x}"></span> 时
+                  <span class="math" data-tex="\hat{y} = w\bar{x} + b = \bar{y}"></span>。
+                  所以不管斜率怎么变，最优直线都绕着这个"重心"转。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>2. 把斜率拉到极端，MSE 涨得比 MAE 快得多，为什么？</summary>
+                <div class="quiz-body">
+                  MSE 把残差平方后再平均，误差越大惩罚越重（二次增长）；MAE 是线性惩罚。
+                  所以 MSE 对离群点更敏感——这既是它的优点（强烈排斥大误差），也是它的缺点（一个异常值就能带偏整条线）。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>3. 既然有闭式解，为什么实际工程里还大量用梯度下降？</summary>
+                <div class="quiz-body">
+                  闭式解要算 <span class="math" data-tex="(X^{\top}X)^{-1}"></span>，
+                  特征数为 <span class="math" data-tex="p"></span> 时代价是
+                  <span class="math" data-tex="O(p^3)"></span>，且矩阵可能奇异不可逆；样本量极大时也装不进内存。
+                  梯度下降每次只用一批数据更新，能扩展到大规模数据，也能用在没有闭式解的模型（比如神经网络）上。
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <aside>
+          <div class="panel">
+            <div class="panel-title">手动调参</div>
+            <div class="stack" id="controls"></div>
+            <div style="display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap">
+              <button class="btn btn-primary" id="btn-ols">用 OLS 求解</button>
+              <button class="btn" id="btn-reset">重置</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">当前表现</div>
+            <div class="metric-grid" id="metrics"></div>
+            <div class="callout callout-tip" id="hint" style="margin-top: 16px"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">使用说明</div>
+            <ol style="font-size: 13px; color: var(--text-2); margin: 0; padding-left: 1.2em">
+              <li>拖「斜率」粗调，观察 MSE 的最低点大概在哪；觉得太灵敏就在数字框里直接敲一个值。</li>
+              <li>用 − / + 按钮做 0.05 的微调，再配合「截距」找组合。</li>
+              <li>点「用 OLS 求解」，对比你手动调出来的结果。</li>
+              <li>切到「代码」页，看这组参数对应什么 sklearn 写法。</li>
+            </ol>
+          </div>
+        </aside>
+      </div>
+
+      <div class="pager" id="pager"></div>
+    </div>
+
+    <footer class="footer">
+      <p>可视化 ECharts · 公式 KaTeX · 数据 Boston Housing（rm → medv，506 条）</p>
+    </footer>
+
+    <script type="module" src="../../src/pages/linearRegression.ts"></script>
+  </body>
+</html>

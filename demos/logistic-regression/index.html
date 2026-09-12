@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Logistic 回归 · 奇迹学习</title>
+    <meta
+      name="description"
+      content="把直线卷成 S 形：看着 sigmoid、交叉熵和梯度下降，一步步把决策边界推到最优。"
+    />
+    <link rel="canonical" href="https://www.godwit.asia/demos/logistic-regression/" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="奇迹学习" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:url" content="https://www.godwit.asia/demos/logistic-regression/" />
+    <meta property="og:title" content="Logistic 回归 · 奇迹学习" />
+    <meta
+      property="og:description"
+      content="把直线卷成 S 形：看着 sigmoid、交叉熵和梯度下降，一步步把决策边界推到最优。"
+    />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <nav class="nav">
+      <a class="nav-brand" href="../../"><span class="dot"></span>奇迹学习</a>
+      <span class="nav-spacer"></span>
+      <div class="nav-links"><a href="../../#demos">全部演示</a></div>
+      <button class="theme-toggle" data-theme-toggle aria-label="切换深浅色主题"></button>
+    </nav>
+
+    <div class="container">
+      <div class="page-head">
+        <div class="crumb"><a href="../../">首页</a> / 基础与评估 / Logistic 回归</div>
+        <h1>Logistic 回归：把直线卷成 S 形</h1>
+        <p>
+          线性回归输出一个任意大小的数，分类器要的是 0 到 1 之间的概率。
+          中间加一层 sigmoid 把整条直线压成 S 形，再用交叉熵当尺子、梯度下降当脚步，
+          一步步把决策边界推到最优。
+        </p>
+      </div>
+
+      <div class="demo-layout">
+        <div>
+          <div class="panel">
+            <div class="panel-title">决策边界与预测概率</div>
+            <div class="chart" id="chart"></div>
+            <div class="ctrl-hint" style="margin-top: 8px">
+              背景深浅 = 模型认为"属于类别 B"的概率；<strong>实线</strong>是当前阈值下的决策边界，
+              线上方的点被判为 B。
+            </div>
+          </div>
+
+          <div class="chart-row" style="margin-top: var(--sp-4)">
+            <div class="panel">
+              <div class="panel-title">损失怎么降下来</div>
+              <div class="chart-sm" id="chart-loss"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-title">S 形映射：z → 概率</div>
+              <div class="chart-sm" id="chart-sigmoid"></div>
+            </div>
+          </div>
+
+          <div class="panel" data-tabs style="margin-top: var(--sp-4)">
+            <div class="tab-bar">
+              <button class="tab is-active" data-tab="code">代码</button>
+              <button class="tab" data-tab="theory">原理</button>
+              <button class="tab" data-tab="quiz">思考题</button>
+            </div>
+
+            <div class="tab-panel is-active" data-panel="code">
+              <div class="code-wrap" style="position: relative">
+                <pre class="code-block" id="code"></pre>
+                <button class="copy-btn" data-copy>复制</button>
+              </div>
+              <div class="callout callout-info" style="margin-top: 16px">
+                上面①段的参数跟着滑杆实时变；②段是同一个模型的 sklearn 写法。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="theory">
+              <h3 style="font-size: 15px; margin-bottom: 8px">① 先算一个分数</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                和线性回归一样，先给每个特征一个权重，加总：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="z = w_1 x_1 + w_2 x_2 + b"
+              ></span>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">② 用 sigmoid 压成概率</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                <span class="math" data-tex="z"></span> 是任意实数，sigmoid 把它压进 (0, 1)：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="\sigma(z) = \frac{1}{1 + e^{-z}}"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                <span class="math" data-tex="z = 0"></span> 时正好是 0.5；
+                <span class="math" data-tex="z \to +\infty"></span> 趋近 1，
+                <span class="math" data-tex="z \to -\infty"></span> 趋近 0。
+                它还是<strong>单调</strong>的——所以"用 <span class="math" data-tex="z"></span> 排序"
+                和"用概率排序"是一回事。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">③ 用交叉熵当尺子</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                预测概率 <span class="math" data-tex="\hat y"></span> 与真实标签
+                <span class="math" data-tex="y \in \{0, 1\}"></span> 的差距：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="J = -\frac{1}{n}\sum_{i=1}^{n}\big[y_i \ln \hat y_i + (1 - y_i)\ln(1 - \hat y_i)\big]"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                判对了还得罚（只是罚得少），所以模型会被推着"更自信一点"。
+                这个损失函数对 <span class="math" data-tex="w"></span> 是<strong>凸</strong>的，
+                没有局部最优——梯度下降走到哪停，都是同一个最优解。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">④ 梯度下降</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                对 <span class="math" data-tex="w_j"></span> 求偏导，形式意外地干净：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="\frac{\partial J}{\partial w_j} = \frac{1}{n}\sum_{i=1}^{n}(\hat y_i - y_i)\, x_{ij}"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                就是"预测减真实"再乘特征值。所有样本都参与一次更新，叫<strong>批量梯度下降</strong>。
+              </p>
+
+              <div class="callout callout-tip" style="margin-top: 16px">
+                <strong>为什么叫"回归"却是分类器？</strong>
+                它回归的是<strong>对数几率</strong>
+                <span class="math" data-tex="\ln\frac{p}{1-p} = w_1x_1 + w_2x_2 + b"></span>，
+                这条式子右边就是一条直线——所以 Logistic 回归本质上仍是<strong>线性</strong>的，
+                决策边界永远是一条直线。切到「月牙」数据集，把参数调到天上去你也分不开它。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="quiz">
+              <details class="quiz">
+                <summary>1. 为什么不能直接用线性回归做分类，非要套一层 sigmoid？</summary>
+                <div class="quiz-body">
+                  线性回归输出可能是 −3 或 17，没法当概率用；而且它对离群点极度敏感——
+                  一个很远的正样本会把整条直线拽过去，原本判对的样本反而判错了。
+                  sigmoid 把输出压进 (0,1)，配合交叉熵，模型就只在"还不够确定"的地方用力。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>2. 切到「线性可分」数据集训练，为什么损失一直在降、权重一直在涨，永远停不下来？</summary>
+                <div class="quiz-body">
+                  因为这个问题<strong>没有最优解</strong>：数据完全分开时，把权重整体放大
+                  <span class="math" data-tex="k"></span> 倍，所有样本的
+                  <span class="math" data-tex="|z|"></span> 都变大，损失就继续下降。
+                  下确界是 0，但取不到，只能无限逼近——代价是权重趋于无穷、模型变得极度自信且脆弱。
+                  这正是<strong>正则化</strong>要解决的问题：给"权重太大"本身加罚。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>3. 把判定阈值从 0.5 调到 0.3，准确率为啥可能下降，但医生反而更愿意用？</summary>
+                <div class="quiz-body">
+                  阈值调低 ⇒ 更多样本被判为正例 ⇒ <strong>召回率上升、精确率下降</strong>。
+                  在癌症筛查里，漏掉一个真患者（假阴性）的代价，远高于让一个健康人多做一次检查（假阳性），
+                  所以宁可牺牲一点准确率也要把召回率拉高。
+                  准确率其实把这两类错误的代价当成了相等的——这在现实里很少成立。
+                  （这一页的乳腺癌数据集就是很好的试验场：把阈值拉到 0.2 看召回率怎么变。）
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>4. 为什么这个页面的坐标都标着"已标准化"？不标准化会怎样？</summary>
+                <div class="quiz-body">
+                  乳腺癌两个特征的量纲差了 500 倍（最大周长 33.6，最大凹点数 0.066）。
+                  不做标准化时，损失曲面是个极扁的峡谷，梯度下降要么在陡的方向来回震荡，
+                  要么在平的方向几乎不动，学习率极难选。
+                  我们开发时真的踩过这个坑：一开始只做了"同尺度缩放"，结果小量纲特征被压成 0.005 量级，
+                  模型等于只用了一个特征，准确率从 94% 掉到 91.9%——是对拍脚本把它揪出来的。
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <aside>
+          <div class="panel">
+            <div class="panel-title">数据与参数</div>
+
+            <div class="field">
+              <label for="sel-data">数据集</label>
+              <select id="sel-data" class="select"></select>
+            </div>
+
+            <div class="stack" id="controls" style="margin-top: 12px"></div>
+
+            <div class="callout callout-tip" id="data-desc" style="margin-top: 14px"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">梯度下降</div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap">
+              <button class="btn" id="btn-step">走 1 步</button>
+              <button class="btn" id="btn-step10">走 10 步</button>
+              <button class="btn btn-primary" id="btn-auto">自动训练</button>
+              <button class="btn" id="btn-converge">训练到收敛</button>
+              <button class="btn" id="btn-reset">重置参数</button>
+            </div>
+            <div class="ctrl-hint" id="train-status" style="margin-top: 10px"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">当前表现</div>
+            <div class="metric-grid" id="metrics"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">使用说明</div>
+            <ol style="font-size: 13px; color: var(--text-2); margin: 0; padding-left: 1.2em">
+              <li>点「自动训练」，看决策边界怎么一点点转正，同时盯着损失曲线。</li>
+              <li>把学习率调到 5，再看一次——曲线会震荡甚至发散。</li>
+              <li>切到「月牙」，训练到收敛也只有 87% 左右：这就是线性模型的天花板。</li>
+              <li>拖动判定阈值，看精确率和召回率怎么此消彼长。</li>
+            </ol>
+          </div>
+        </aside>
+      </div>
+
+      <div class="pager" id="pager"></div>
+    </div>
+
+    <footer class="footer">
+      <p>
+        可视化 ECharts · 公式 KaTeX · 算法已与 scikit-learn 1.9（无正则 lbfgs）及 scipy.expit 对拍 ·
+        乳腺癌数据来自 sklearn.datasets
+      </p>
+    </footer>
+
+    <script type="module" src="../../src/pages/logisticRegression.ts"></script>
+  </body>
+</html>

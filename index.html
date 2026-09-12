@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>奇迹学习 · 机器学习交互演示</title>
+    <meta
+      name="description"
+      content="机器学习可视化教学站：拖滑杆调参数，看懂原理，并得到可以直接带走的 sklearn 代码。"
+    />
+    <link rel="canonical" href="https://www.godwit.asia/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="奇迹学习" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:url" content="https://www.godwit.asia/" />
+    <meta property="og:title" content="奇迹学习 · 机器学习交互演示" />
+    <meta
+      property="og:description"
+      content="拖滑杆调参数，实时看模型怎么变；旁边写着等价的 sklearn 代码，玩完就知道该怎么写。"
+    />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <nav class="nav">
+      <a class="nav-brand" href="./"><span class="dot"></span>奇迹学习</a>
+      <span class="nav-spacer"></span>
+      <div class="nav-links">
+        <a href="#demos">演示</a>
+        <a href="#features">特性</a>
+      </div>
+      <button class="theme-toggle" data-theme-toggle aria-label="切换深浅色主题"></button>
+    </nav>
+
+    <header class="hero container">
+      <div class="hero-grid">
+        <div class="hero-main">
+          <p class="hero-eyebrow"><span class="eyebrow-bar"></span>INTERACTIVE ML LAB</p>
+          <h1>把机器学习<b>拖着</b>玩明白</h1>
+          <p class="hero-sub">
+            拖滑杆调参数，实时看模型怎么变；旁边写着等价的 sklearn 代码 ——
+            玩完就知道该怎么写。
+          </p>
+          <!--
+            只留三个数字，且刻意避开「三个都是 10」那种看起来像渲染错的排面。
+            第二个把「手写算法」和「零依赖」合成一条，因为是同一件事的两面。
+            第三个（断言总数）由 src/data/siteStats.json 注入，并且被 verify:all 校验，
+            改断言忘了改这里会让回归变红，不会静默过期。
+          -->
+          <dl class="hero-stats">
+            <div class="stat">
+              <dt>10</dt>
+              <dd>个交互演示</dd>
+            </div>
+            <div class="stat">
+              <dt>10</dt>
+              <dd>套手写算法，零数学库依赖</dd>
+            </div>
+            <div class="stat">
+              <dt id="stat-assertions">—</dt>
+              <dd>项页面断言全绿</dd>
+            </div>
+          </dl>
+          <a class="hero-cta" href="demos/linear-regression/">
+            从线性回归开始<span class="hero-cta-arrow" aria-hidden="true">→</span>
+          </a>
+        </div>
+
+        <aside class="hero-console" aria-hidden="true">
+          <div class="console-bar">
+            <span class="console-dot"></span><span class="console-dot"></span><span class="console-dot"></span>
+            <span class="console-file">linkage.py</span>
+          </div>
+          <pre class="console-code"><span class="kw">from</span> sklearn.linear_model <span class="kw">import</span> LogisticRegression
+
+model = LogisticRegression(
+    C=<span class="num">1.00</span>, penalty=<span class="str">'l2'</span>)
+model.fit(X, y)</pre>
+          <div class="console-meta">
+            <div class="metric-line"><span>训练损失</span><b>0.1032</b></div>
+            <svg class="spark" viewBox="0 0 240 56" preserveAspectRatio="none" role="presentation"></svg>
+            <div class="metric-line"><span>准确率</span><b>0.9672</b></div>
+            <div class="metric-line"><span>迭代</span><b>14 次</b></div>
+          </div>
+        </aside>
+      </div>
+    </header>
+
+    <main id="home-root" class="container" style="max-width: var(--maxw)"></main>
+
+    <section class="section container" id="features"></section>
+
+    <footer class="footer">
+      <p>奇迹学习 · 机器学习交互演示 &nbsp;|&nbsp; 可视化用 ECharts，公式用 KaTeX</p>
+    </footer>
+
+    <script type="module" src="/src/pages/home.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>支持向量机 · 奇迹学习</title>
+    <meta
+      name="description"
+      content="最大间隔、软间隔与核技巧：亲手拖 C 和 γ，看支持向量怎么挑出来，看线性核在月牙上撞墙、RBF 核一步解开。"
+    />
+    <link rel="canonical" href="https://www.godwit.asia/demos/svm/" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="奇迹学习" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:url" content="https://www.godwit.asia/demos/svm/" />
+    <meta property="og:title" content="支持向量机 · 奇迹学习" />
+    <meta
+      property="og:description"
+      content="最大间隔、软间隔与核技巧：亲手拖 C 和 γ，看支持向量怎么挑出来，看线性核在月牙上撞墙、RBF 核一步解开。"
+    />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <nav class="nav">
+      <a class="nav-brand" href="../../"><span class="dot"></span>奇迹学习</a>
+      <span class="nav-spacer"></span>
+      <div class="nav-links"><a href="../../#demos">全部演示</a></div>
+      <button class="theme-toggle" data-theme-toggle aria-label="切换深浅色主题"></button>
+    </nav>
+
+    <div class="container">
+      <div class="page-head">
+        <div class="crumb"><a href="../../">首页</a> / 经典分类 / 支持向量机</div>
+        <h1>支持向量机：把间隔撑到最宽</h1>
+        <p>
+          Logistic 回归找的是「一条能分开的线」，SVM 找的是「离两边都最远的那条线」。
+          这个"最远"的要求，最后只由少数几个点决定——它们叫支持向量。
+          当一条直线实在分不开时，核技巧把数据悄悄搬到高维，在那里一刀切开。
+        </p>
+      </div>
+
+      <div class="demo-layout">
+        <div>
+          <div class="panel">
+            <div class="panel-title">决策边界与间隔带</div>
+            <div class="chart" id="chart-boundary"></div>
+            <div class="ctrl-hint" style="margin-top: 8px">
+              底色是决策函数 <span class="math" data-tex="f(x)"></span> 的取值：
+              <strong>深色</strong>是确信的一侧（|f| &gt; 1），
+              <strong>浅色</strong>是间隔带内部（|f| ≤ 1）——SVM 尽量让这条带子变宽且不夹住点。
+              带圈的点是<strong>支持向量</strong>，整条边界只由它们决定。
+            </div>
+          </div>
+
+          <div class="chart-row" style="margin-top: var(--sp-4)">
+            <div class="panel">
+              <div class="panel-title">每个样本的 α（对偶变量）</div>
+              <div class="chart-sm" id="chart-alpha"></div>
+              <div class="ctrl-hint">
+                绝大多数 α 是 0——这就是「稀疏性」：只有支持向量在起作用。
+                α = C 的点是<strong>被放弃的点</strong>（落在间隔内或分错了），模型不再为它们继续加码。
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-title">训练过程</div>
+              <div class="metric-grid" id="metrics"></div>
+              <div class="ctrl-hint" id="train-status" style="margin-top: 10px"></div>
+            </div>
+          </div>
+
+          <div class="panel" data-tabs style="margin-top: var(--sp-4)">
+            <div class="tab-bar">
+              <button class="tab is-active" data-tab="code">代码</button>
+              <button class="tab" data-tab="theory">原理</button>
+              <button class="tab" data-tab="quiz">思考题</button>
+            </div>
+
+            <div class="tab-panel is-active" data-panel="code">
+              <div class="code-wrap" style="position: relative">
+                <pre class="code-block" id="code"></pre>
+                <button class="copy-btn" data-copy>复制</button>
+              </div>
+              <div class="callout callout-info" style="margin-top: 16px">
+                ①段是你现在这组参数的 sklearn 写法（数值是页面上真跑出来的）；
+                ②段是它内部真正在解的东西——对偶问题。本页的 α 就是自己解出来的。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="theory">
+              <h3 style="font-size: 15px; margin-bottom: 8px">① 要的不是"能分开"，是"分得最稳"</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                能分开的直线有无数条。SVM 挑那条离最近的点最远的——把间隔撑到最宽，
+                模型对噪声的容忍度就最大：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="\min_{w,b}\ \tfrac{1}{2}\|w\|^2 \quad \text{s.t.}\quad y_i(w\cdot x_i + b) \ge 1"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                约束取 1 是人为约定的（w、b 可以整体缩放）；间隔宽度就是
+                <span class="math" data-tex="2/\|w\|"></span>，所以最小化
+                <span class="math" data-tex="\|w\|"></span> 就是最大化间隔。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">② 分不开怎么办：软间隔与 C</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                现实数据总有重叠。给每个样本一个松弛量
+                <span class="math" data-tex="\xi_i \ge 0"></span>，允许它越界，但要罚：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="\min\ \tfrac{1}{2}\|w\|^2 + C\sum_i \xi_i"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                <strong>C 就是"容忍度"的反面</strong>：C 大 → 几乎不容忍错分 → 间隔窄、容易被噪声带偏；
+                C 小 → 宽容 → 间隔宽、更稳。这是 SVM 最重要的一个超参数。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">③ 对偶：整条边界只由少数点决定</h3>
+              <span
+                class="math"
+                data-display
+                data-tex="\max_{\alpha}\ \sum_i \alpha_i - \tfrac{1}{2}\sum_{i,j}\alpha_i\alpha_j y_i y_j \langle x_i, x_j\rangle"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                约束是 <span class="math" data-tex="0 \le \alpha_i \le C"></span> 与
+                <span class="math" data-tex="\sum_i \alpha_i y_i = 0"></span>。
+                解出来以后 <span class="math" data-tex="w = \sum_i \alpha_i y_i x_i"></span>——
+                <strong>只有 αᵢ &gt; 0 的样本进入这个求和</strong>，它们就是支持向量。
+                KKT 条件把话说得更清楚：
+              </p>
+              <ul style="font-size: 13px; color: var(--text-2); padding-left: 1.2em">
+                <li><span class="math" data-tex="\alpha_i = 0"></span>：在间隔外，随便怎么动都不影响边界</li>
+                <li><span class="math" data-tex="0 < \alpha_i < C"></span>：<strong>正好压在间隔边界上</strong>，撑出了间隔</li>
+                <li><span class="math" data-tex="\alpha_i = C"></span>：在间隔内甚至分错了，模型"放弃"继续为它调整</li>
+              </ul>
+              <p style="font-size: 13px; color: var(--text-2)">
+                这就是为什么 200 个样本里往往只有十几个是支持向量——页面上那张 α 图看得最清楚。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">④ 核技巧：直线分不开，就换一把尺子</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                对偶式里数据<strong>只以点积 ⟨xᵢ, xⱼ⟩ 的形式出现</strong>。把点积换成一个核函数，
+                等价于把数据映射到高维再算点积，却不用真去算那个映射：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="K(x,z) = \langle \varphi(x), \varphi(z)\rangle"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                本页提供三种：
+              </p>
+              <ul style="font-size: 13px; color: var(--text-2); padding-left: 1.2em">
+                <li><strong>线性</strong>：<span class="math" data-tex="K = \langle x,z\rangle"></span>，就是原来的 SVM</li>
+                <li>
+                  <strong>RBF</strong>：
+                  <span class="math" data-tex="K = e^{-\gamma\|x-z\|^2}"></span>，
+                  每个样本周围点了一盏"高斯灯"，γ 决定灯罩多大
+                </li>
+                <li>
+                  <strong>多项式</strong>：
+                  <span class="math" data-tex="K = (\gamma\langle x,z\rangle + r)^d"></span>，
+                  显式构造出所有 d 阶交叉项
+                </li>
+              </ul>
+
+              <div class="callout callout-tip" style="margin-top: 16px">
+                <strong>γ 是 RBF 核的"视野半径"。</strong>
+                γ 太小 → 灯照得太远，所有点看起来都差不多，边界被拉成近似直线，
+                连训练集都分不好（同心圆上 γ=0.01 只有 69% 准确率，
+                而且 <strong>200 个样本一个不落全成了支持向量</strong>）；
+                γ 太大 → 每盏灯只照到自己，边界绕着单个样本走，训练集上很漂亮但泛化风险大。
+                切到「同心圆」，把 γ 从 0.01 慢慢拖到 1，看准确率怎么跳上去、支持向量怎么掉下来。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="quiz">
+              <details class="quiz">
+                <summary>1. 200 个样本里只有十几个是支持向量——为什么丢掉其余 190 个，边界一点不变？</summary>
+                <div class="quiz-body">
+                  因为在<strong>对偶形式</strong>里 <span class="math" data-tex="w = \sum_i \alpha_i y_i x_i"></span>，
+                  非支持向量的 αᵢ = 0，根本不进入求和。
+                  KKT 条件说明了它们为什么可以是 0：这些点已经在间隔外、被正确分类了，
+                  <strong>再让步长怎么变都轮不到它们来约束边界</strong>。
+                  所以"删掉它们"不是近似——是严格的等价。这也是 SVM 比很多模型省内存的原因：
+                  预测时只需要留支持向量。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>2. 线性核在「月牙」上把 C 调到 10000 也分不开，为什么？</summary>
+                <div class="quiz-body">
+                  因为线性核的决策边界<strong>永远是一条直线</strong>（在原始空间里）。
+                  月牙是两道交错的弧，任何一条直线都会切错一批点——这不是 C 不够大，
+                  而是<strong>假设空间里压根没有正确答案</strong>。
+                  C 调大只会让模型为了少数几个难分点把边界扭来扭去（虽然它扭不动），
+                  结果间隔变窄、对噪声更敏感。换成 RBF 核后，准确率直接从 87% 上到 98%——
+                  这就是核技巧的价值：<strong>换的不是参数，是假设空间</strong>。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>3. αᵢ = C 的点被称为"被放弃的点"，为什么？</summary>
+                <div class="quiz-body">
+                  因为对偶约束 <span class="math" data-tex="0 \le \alpha_i \le C"></span> 是一堵墙。
+                  当一个点很难分（在间隔内或分错了）时，算法想不断加大它的 αᵢ 来"讨好"它，
+                  但撞到上界 C 就加不动了。此时 KKT 条件允许
+                  <span class="math" data-tex="y_i f(x_i) < 1"></span>——也就是容忍它错着。
+                  <strong>C 越大，这堵墙越高，模型越不肯放弃任何一个点</strong>，
+                  这正是过拟合的来源之一。把 C 从 0.1 拖到 100，看 α 图里有多少根柱子顶到上界。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>4. 为什么把 C 调小，支持向量反而变得更多？</summary>
+                <div class="quiz-body">
+                  因为 C 是"错分要罚多重"。C 小意味着惩罚轻，模型宁可把间隔撑得很宽、
+                  容忍一批点越界，也不愿为了个别难点把边界挤窄。
+                  <strong>间隔越宽，压在间隔边界上的点就越多</strong>——它们全是支持向量（0 &lt; αᵢ &lt; C）。
+                  本页「线性可分」数据集上最直观：C=0.01 时有 79 个支持向量、间隔宽度 2.64；
+                  C=100 时只剩 3 个、间隔 0.66。
+                  反过来，C 大时惩罚重，边界被推到"勉强刚好分开"的位置，只有极少数点还有约束力。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>5. 本页的 α 是自己解出来的，怎么确认解得对？</summary>
+                <div class="quiz-body">
+                  两条独立的证据。第一，<strong>KKT 条件自检</strong>：最优解必须让每个样本都满足
+                  「α=0 时 yf ≥ 1、0&lt;α&lt;C 时 yf = 1、α=C 时 yf ≤ 1」，本页解完后残差是 0 量级。
+                  第二，<strong>与 libsvm 对拍</strong>：18 组（5 个数据集 × 三种核 × 几档 C/γ）配置下，
+                  对偶目标值的最大相对差是 8e-9，支持向量个数与 sklearn 完全一致。
+                  凸二次规划的最优值是唯一的，所以这两条都成立时，解就是对的。
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <aside>
+          <div class="panel">
+            <div class="panel-title">模型设置</div>
+
+            <div class="field">
+              <label for="sel-data">数据集</label>
+              <select id="sel-data" class="select"></select>
+            </div>
+
+            <div class="field" style="margin-top: 12px">
+              <label for="sel-kernel">核函数</label>
+              <select id="sel-kernel" class="select">
+                <option value="linear">线性核：K = ⟨x, z⟩</option>
+                <option value="rbf">RBF 核：K = exp(−γ‖x−z‖²)</option>
+                <option value="poly">多项式核：K = (γ⟨x, z⟩ + r)^d</option>
+              </select>
+            </div>
+
+            <div class="stack" id="controls" style="margin-top: 12px"></div>
+
+            <div class="callout callout-tip" id="data-desc" style="margin-top: 14px"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">使用说明</div>
+            <ol style="font-size: 13px; color: var(--text-2); margin: 0; padding-left: 1.2em">
+              <li>先在「线性可分」上把 C 从小拖到大，看间隔带怎么变窄、支持向量怎么变少。</li>
+              <li>切到「月牙」，保持线性核——准确率上不去。再换 RBF 核。</li>
+              <li>在「同心圆」上把 γ 从 0.01 拖到 1：准确率从 69% 跳到 99%，支持向量从 200 个掉到 64 个。</li>
+              <li>盯着 α 图：柱子越高越是"难分的点"，顶到 C 的那些已经放弃治疗了。</li>
+            </ol>
+          </div>
+        </aside>
+      </div>
+
+      <div class="pager" id="pager"></div>
+    </div>
+
+    <footer class="footer">
+      <p>
+        可视化 ECharts · 公式 KaTeX · SMO 手写实现，对偶目标 / 决策函数 / 支持向量个数已与
+        scikit-learn 1.9（libsvm）在 18 组配置下对拍 · 乳腺癌数据来自 sklearn.datasets
+      </p>
+    </footer>
+
+    <script type="module" src="../../src/pages/svm.ts"></script>
+  </body>
+</html>

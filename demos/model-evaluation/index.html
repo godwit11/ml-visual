@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>模型评估 · 奇迹学习</title>
+    <meta
+      name="description"
+      content="混淆矩阵、ROC、PR 曲线与交叉验证：亲手拖动阈值，看准确率怎么骗人，看同一个模型在 5% 患病率下如何失效。"
+    />
+    <link rel="canonical" href="https://www.godwit.asia/demos/model-evaluation/" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="奇迹学习" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:url" content="https://www.godwit.asia/demos/model-evaluation/" />
+    <meta property="og:title" content="模型评估 · 奇迹学习" />
+    <meta
+      property="og:description"
+      content="混淆矩阵、ROC、PR 曲线与交叉验证：亲手拖动阈值，看准确率怎么骗人，看同一个模型在 5% 患病率下如何失效。"
+    />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <nav class="nav">
+      <a class="nav-brand" href="../../"><span class="dot"></span>奇迹学习</a>
+      <span class="nav-spacer"></span>
+      <div class="nav-links"><a href="../../#demos">全部演示</a></div>
+      <button class="theme-toggle" data-theme-toggle aria-label="切换深浅色主题"></button>
+    </nav>
+
+    <div class="container">
+      <div class="page-head">
+        <div class="crumb"><a href="../../">首页</a> / 基础与评估 / 模型评估</div>
+        <h1>模型评估：准确率骗了你多少</h1>
+        <p>
+          模型训练完了，怎么知道它到底行不行？「准确率 95%」听起来很好，
+          可如果 95% 的样本本来就是同一类，这个数字一文不值。
+          这一页把混淆矩阵、ROC、PR 和交叉验证四样东西摆在一起，
+          让你拖动阈值、切换场景，亲眼看它们怎么互相打架。
+        </p>
+      </div>
+
+      <div class="demo-layout">
+        <div>
+          <div class="panel" data-tabs>
+            <div class="tab-bar">
+              <button class="tab is-active" data-tab="metric">性能指标</button>
+              <button class="tab" data-tab="cv">交叉验证</button>
+            </div>
+
+            <!-- ============ 性能指标 ============ -->
+            <div class="tab-panel is-active" data-panel="metric">
+              <div class="chart" id="chart-dist"></div>
+              <div class="ctrl-hint" style="margin-top: 8px">
+                两类样本的<strong>分数分布</strong>：左边是负例、右边是正例（重叠处就是模型分不清的地方）。
+                竖线是当前阈值——线右侧全部判为「正」。
+                <strong>拖动阈值，看下面四个格子怎么此消彼长</strong>。
+                （合成数据里两类重叠得多，阈值 0.5 并不是好选择，试着拖到 0.35 附近看看。）
+              </div>
+
+              <div class="matrix-wrap" style="margin-top: var(--sp-4)">
+                <div class="matrix" id="matrix"></div>
+                <div class="matrix-side">
+                  <div class="panel-title" style="margin-bottom: 10px">判对了多少，判错了哪种</div>
+                  <div id="matrix-note" style="font-size: 13px; color: var(--text-2)"></div>
+                </div>
+              </div>
+
+              <div class="chart-row" style="margin-top: var(--sp-4)">
+                <div class="panel">
+                  <div class="panel-title">ROC 曲线</div>
+                  <div class="chart-sm" id="chart-roc"></div>
+                  <div class="ctrl-hint">横轴：负例被误判为正的比例。纵轴：正例被抓到的比例。动阈值时圆点沿曲线滑动。</div>
+                </div>
+                <div class="panel">
+                  <div class="panel-title">PR 曲线</div>
+                  <div class="chart-sm" id="chart-pr"></div>
+                  <div class="ctrl-hint">横轴：召回率。纵轴：精确率。虚线是「瞎猜」的水平 —— 准确率再高也骗不过它。</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ============ 交叉验证 ============ -->
+            <div class="tab-panel" data-panel="cv">
+              <div class="cv-toolbar">
+                <div class="field" style="margin: 0">
+                  <label for="sel-cv">数据集</label>
+                  <select id="sel-cv" class="select"></select>
+                </div>
+                <div class="stack" id="cv-controls" style="flex: 1 1 260px"></div>
+              </div>
+
+              <div class="chart-sm" id="chart-cv" style="margin-top: 16px; height: 280px"></div>
+              <div class="metric-grid" id="cv-metrics" style="margin-top: 14px"></div>
+              <div class="ctrl-hint" id="cv-status" style="margin-top: 12px"></div>
+
+              <div class="panel-title" style="margin: 20px 0 10px">每一折长什么样</div>
+              <div class="fold-list" id="fold-list"></div>
+              <div class="ctrl-hint" style="margin-top: 10px">
+                每条横条代表一折，<strong>填充长度 = 该折里正例的比例</strong>；
+                灰线是整体的正例比例。如果不分层，数据里恰好又是「同类样本挤在一起」，
+                就会出现某一折几乎没有正例的情况——那一折的准确率毫无意义。
+              </div>
+            </div>
+          </div>
+
+          <!-- ============ 代码 / 原理 / 思考题 ============ -->
+          <div class="panel" data-tabs style="margin-top: var(--sp-4)">
+            <div class="tab-bar">
+              <button class="tab is-active" data-tab="code">代码</button>
+              <button class="tab" data-tab="theory">原理</button>
+              <button class="tab" data-tab="quiz">思考题</button>
+            </div>
+
+            <div class="tab-panel is-active" data-panel="code">
+              <div class="code-wrap" style="position: relative">
+                <pre class="code-block" id="code"></pre>
+                <button class="copy-btn" data-copy>复制</button>
+              </div>
+              <div class="callout callout-info" style="margin-top: 16px">
+                ①段是你手调阈值的结果，跟着滑杆实时变；②③段是同一件事的 sklearn 写法。
+                注意 <code>roc_auc_score</code> 不需要传阈值——它把<strong>所有</strong>阈值都考虑完了。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="theory">
+              <h3 style="font-size: 15px; margin-bottom: 8px">① 混淆矩阵：四种结果，不是一个数字</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                分类只有「正/负」两种预测和两种真实，两两组合就是四个格子。
+                准确率把四个格子揉成一个数，代价是把两类错误的<strong>不同后果</strong>抹平了：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="\text{Accuracy} = \frac{TP + TN}{TP + FP + TN + FN}"
+              ></span>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">② 精确率与召回率：一对跷跷板</h3>
+              <span
+                class="math"
+                data-display
+                data-tex="\text{Precision} = \frac{TP}{TP + FP}, \qquad \text{Recall} = \frac{TP}{TP + FN}"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                精确率问「你说是正例的，有多少真是」，召回率问「真正的正例，你抓到了多少」。
+                把阈值调低，召回率必然上升、精确率必然下降——这不是缺点，是定义决定的。
+                <span class="math" data-tex="F_1 = \frac{2PR}{P+R}"></span> 是两者的调和平均，
+                用来在必须给一个数的时候兼顾两边。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">③ ROC：把阈值从头到尾走一遍</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                与其纠结一个阈值，不如把阈值从 +∞ 降到 −∞，每走一步记下 (假正率, 召回率)：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="\text{FPR} = \frac{FP}{FP + TN}, \qquad \text{TPR} = \frac{TP}{TP + FN}"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                曲线下的面积就是 <strong>AUC</strong>，它有一个很好用的概率解释：
+                <em>随机抽一个正例和一个负例，模型给正例的分数更高的概率</em>。
+                所以 AUC = 0.5 就是瞎猜，与阈值无关——换阈值只让你在曲线<strong>上滑动</strong>，不改变面积。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">④ PR 曲线：类别不平衡时更敏感</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                FPR 的分母里有 <span class="math" data-tex="TN"></span>。负例极多时，
+                即使冒出一大批假正例，<span class="math" data-tex="FP/(FP+TN)"></span> 看起来仍然很小，
+                ROC 曲线照样很漂亮。PR 曲线的分母只有真正例和假正例，藏不住。
+                所以做稀有病筛查、欺诈检测这类任务，优先看 PR。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">⑤ 交叉验证：一次划分不算数</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                把数据切一份当测试集，得到的分数<strong>本身也是随机的</strong>。
+                K 折是把数据切成 K 份，轮流让每一份当验证集、其余当训练集，得到 K 个分数：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="\text{CV} = \frac{1}{K}\sum_{i=1}^{K} \text{score}_i"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                重点不是均值，是<strong>标准差</strong>——它告诉你这个模型的成绩有多不稳。
+                另外，分类任务要用<strong>分层</strong>切分：保证每折的类别比例与整体一致，
+                否则某一折里可能一个正例都没有。
+              </p>
+
+              <div class="callout callout-tip" style="margin-top: 16px">
+                <strong>同一份数据、同一个模型、两个场景。</strong>
+                「乳腺癌」和「稀有病」用的是<strong>同一组权重、同一个分数公式</strong>，
+                只是后者从这份数据里抽出了患病率 5% 的子集。切过去看看：
+                ROC-AUC 只从 0.986 掉到 0.969（几乎没动），
+                但<strong>精确率从 0.916 腰斩到 0.500</strong>——判为「患病」的人里有一半是虚惊；
+                PR-AUC 也从 0.983 掉到 0.919。这就是为什么类别不平衡时要看 PR 而不是 ROC。
+                想看更纯粹的对照（<strong>分数分布完全不变、只改患病率</strong>），
+                用合成数据集拖「正例占比」滑杆。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="quiz">
+              <details class="quiz">
+                <summary>1. 稀有病那个数据集里，一个「全都判健康」的傻瓜模型准确率有 95%——它到底错在哪？</summary>
+                <div class="quiz-body">
+                  它一个患者都没抓到，召回率 = 0，精确率按约定记 0，F1 = 0。
+                  准确率高只是因为<strong>负例占了 95%</strong>，把「全判负例」当成了正确答案。
+                  这正是准确率在类别不平衡时的失效：它给每个样本同样的权重，
+                  而现实中漏掉一个患者的代价远高于误报一个健康人。
+                  切到 PR 曲线看，这个模型的曲线会贴着底部走。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>2. 为什么 AUC 与阈值无关，准确率却强依赖阈值？</summary>
+                <div class="quiz-body">
+                  因为 AUC 对<strong>所有</strong>阈值积分：它衡量的是分数排序的质量——
+                  正例的分数是不是普遍比负例高。换阈值只改变你切在哪一刀，排序没变。
+                  准确率则是在某一个具体阈值上数对错，切的位置一变，FP 和 FN 的分配就变。
+                  所以 AUC 是「模型的属性」，准确率是「模型 + 阈值」的共同属性。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>3. 乳腺癌上的 AUC 高达 0.986，是不是说明这个模型可以直接用了？</summary>
+                <div class="quiz-body">
+                  不能只看这一个数。AUC 高说明<strong>排序能力</strong>好，但实际使用时你必须定一个阈值，
+                  而 0.5 这个默认阈值在这里只给到 94% 准确率、召回率约 92%。
+                  把阈值调到 0.2 左右，召回率能上到 97% 以上（代价是精确率下降、更多健康人被叫回来复查）。
+                  在筛查场景里这个交换通常是值的——<strong>阈值的选择是业务决定，不是算法决定</strong>。
+                  切到数据集里的乳腺癌，自己拖阈值看这三个数的变化。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>4. 非分层 K 折时，某一折里可能只有 1 个正例（稀有病数据集就是这样）。这一折的准确率会怎样？</summary>
+                <div class="quiz-body">
+                  会失真。若这 1 个正例恰好被判错，这一折的准确率立刻掉到接近 0（如果折里 75 个样本只有 1 个正例，
+                  判错就丢了 1/75）；若判对了，准确率又漂亮得看不出问题。
+                  <strong>方差被人为放大了</strong>，10 折跑出来的标准差会大得吓人——但那是切分方式造成的，不是模型不稳。
+                  这就是分层切分存在的理由：让每折的类别比例都接近整体。
+                  本页的「每一折长什么样」那组横条就是用来看到这一点的。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>5. 为什么这一页的 ROC 曲线有几百个点，而不是「阈值从 0 到 1 每隔 0.01 取一个」？</summary>
+                <div class="quiz-body">
+                  因为 ROC 的定义是<strong>沿样本逐个移动阈值</strong>：把样本按分数从高到低排列，
+                  每纳进一个样本就记一个点。曲线只会在样本的分数处拐弯，
+                  中间取再多点也只是在同一条线段上插值，白白浪费计算。
+                  sklearn 更进一步：默认还会删掉共线的中间点（<code>drop_intermediate=True</code>），
+                  乳腺癌那 570 个点会被压成 42 个——形状完全一样，只是更省。
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <aside>
+          <div class="panel">
+            <div class="panel-title">数据与参数</div>
+
+            <div class="field">
+              <label for="sel-data">数据集</label>
+              <select id="sel-data" class="select"></select>
+            </div>
+
+            <div class="stack" id="controls" style="margin-top: 12px"></div>
+
+            <div class="callout callout-tip" id="data-desc" style="margin-top: 14px"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">当前表现</div>
+            <div class="metric-grid" id="metrics"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">使用说明</div>
+            <ol style="font-size: 13px; color: var(--text-2); margin: 0; padding-left: 1.2em">
+              <li>先拖「判定阈值」，盯着混淆矩阵四个格子怎么变。</li>
+              <li>点 ROC 曲线上的圆点位置，看它随阈值滑动——面积（AUC）始终不变。</li>
+              <li>切到「稀有病筛查」，ROC-AUC 几乎没动，但精确率从 0.92 腰斩到 0.50。</li>
+              <li>切到「交叉验证」，把「分层」关掉，看那组横条怎么失衡。</li>
+            </ol>
+          </div>
+        </aside>
+      </div>
+
+      <div class="pager" id="pager"></div>
+    </div>
+
+    <footer class="footer">
+      <p>
+        可视化 ECharts · 公式 KaTeX · 指标 / ROC / PR / AUC 与 K 折划分已与 scikit-learn 1.9
+        逐点对拍（含 KFold 与 StratifiedKFold） · 乳腺癌数据来自 sklearn.datasets
+      </p>
+    </footer>
+
+    <script type="module" src="../../src/pages/modelEvaluation.ts"></script>
+  </body>
+</html>

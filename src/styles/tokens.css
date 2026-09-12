@@ -1,0 +1,145 @@
+:root {
+  color-scheme: light;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --sp-8: 64px;
+
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 26px;
+  --fs-3xl: 36px;
+
+  --maxw: 1180px;
+  --nav-h: 56px;
+  --t-fast: 0.15s ease;
+}
+
+/* ------------------------------------------------------------------
+ * 背景光效的调色板（「暗红科技感 + 机器学习」主题背景）
+ *
+ * 配色逻辑（改这里之前先读）：
+ *   底色/光晕 = 酒红、绯红（暖）→ 负责"氛围"，低透明度铺开
+ *   节点/连线 = 青蓝（冷）      → 负责"结构"，是红的**互补色**。
+ *             冷色网格压在暖底上才有科技感；如果节点也用红色，
+ *             整屏只剩一个色相，会糊成一片、也显廉价。
+ *   数据脉冲  = 红粉（暖、亮）  → 负责"强调"，数量少、亮度高，
+ *             在青蓝连线上跑，是全屏唯一的高对比点。
+ *
+ * 约定：
+ *   ① RGB 分量写成 `R G B` 三段式（不带 rgb()），这样 CSS 里可以直接
+ *      `rgb(var(--bgfx-node) / 0.3)`，JS 里也能用同一个值拼 alpha，
+ *      两边读的是同一份数字，不会出现"页面和画布颜色对不上"。
+ *   ② 全部避开高饱和大红：红系最深也就到 ~(208,92,96)，且一律低透明度。
+ *      大红配大面积底色会显得躁，也压不住正文。
+ *   ③ `--bgfx-strength` 是给 canvas 用的总强度系数：
+ *      深色主题铺满，浅色主题只留一层"暖纸"质感，保证白色卡片可读。
+ * ------------------------------------------------------------------ */
+:root[data-theme="light"] {
+  --bgfx-base: #fbf7f6;
+  --bgfx-base-2: #f7efee;
+  --bgfx-glow-a: 208 92 96;
+  --bgfx-glow-b: 228 138 112;
+  /* 浅色主题网格用很淡的酒红：底色本来就浅，太饱和会整页泛粉、白卡片拉不开 */
+  --bgfx-grid: 186 132 134;
+  /* 节点/连线：浅色底上的青蓝要压深，否则对比度不够看不见 */
+  --bgfx-node: 58 122 165;
+  --bgfx-edge: 72 132 172;
+  /* 脉冲：亮红粉，在浅底上降低亮度 */
+  --bgfx-pulse: 214 84 92;
+  --bgfx-curve: 186 96 96;
+  --bgfx-noise-opacity: 0.03;
+  --bgfx-strength: 0.5;
+
+  --bg: #f8f5f5;
+  --bg-elev: #ffffff;
+  --bg-soft: #f3eeee;
+  --bg-code: #f5f1f1;
+  --text: #1a1d24;
+  --text-2: #565b66;
+  --text-3: #8b90a0;
+  --border: #e8e2e2;
+  --border-strong: #d6cbcb;
+  --primary: #4f46e5;
+  --primary-weak: #eef0ff;
+  --primary-strong: #4338ca;
+  --primary-text: #ffffff;
+  --accent: #0d9488;
+  --accent-weak: #e6f6f4;
+  --warn: #b45309;
+  --warn-weak: #fdf3e3;
+  --danger: #dc2626;
+  --shadow-1: 0 1px 2px rgba(60, 24, 24, 0.05), 0 1px 3px rgba(60, 24, 24, 0.07);
+  --shadow-2: 0 6px 18px rgba(60, 24, 24, 0.08);
+  --chart-grid: #ece5e5;
+  --chart-axis: #8b90a0;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* 黑红底：从近黑的酒红渐变到稍亮的暗红 */
+  --bgfx-base: #0f0709;
+  --bgfx-base-2: #170b0f;
+  --bgfx-glow-a: 186 52 68;
+  --bgfx-glow-b: 240 110 88;
+  /* 网格：深酒红，避免之前的橙棕感 */
+  --bgfx-grid: 176 68 78;
+  /* 节点/连线：冷青蓝，与暖红底形成互补，结构感来源 */
+  --bgfx-node: 122 206 238;
+  --bgfx-edge: 78 156 202;
+  /* 脉冲：亮红粉，唯一的暖色高光点 */
+  --bgfx-pulse: 255 142 140;
+  --bgfx-curve: 208 92 96;
+  --bgfx-noise-opacity: 0.055;
+  --bgfx-strength: 1;
+
+  /*
+   * 表面色也走暖调，和 `--bgfx-base` 同一个色相家族。
+   *
+   * 为什么必须改：底色换成黑红之后，如果卡片/边框还是原来的
+   * 蓝灰（#161a22 / #262b36），整页就是"蓝灰卡片浮在红底上"，
+   * 两个色温打架，看着像没做完。这里把中性面统一往酒红方向偏一点点，
+   * 亮度梯度（bg → bg-soft → bg-elev）保持不变，所以原来的层级关系没变。
+   * 正文色（--text 系）保持中性偏冷的高亮度灰，在暖底上对比度反而更好。
+   */
+  --bg: #120a0c;
+  --bg-elev: #1b1114;
+  --bg-soft: #241619;
+  --bg-code: #150d10;
+  --text: #e8e6ea;
+  --text-2: #a9a3ac;
+  --text-3: #7a7078;
+  --border: #35242b;
+  --border-strong: #48333d;
+  --primary: #8b93f8;
+  --primary-weak: #221a2c;
+  --primary-strong: #aab2fc;
+  --primary-text: #120a0c;
+  --accent: #34d3c0;
+  --accent-weak: #102b28;
+  --warn: #fbbf24;
+  --warn-weak: #2b2312;
+  --danger: #f87171;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-2: 0 6px 18px rgba(0, 0, 0, 0.5);
+  --chart-grid: #2a1c21;
+  --chart-axis: #7a7078;
+}

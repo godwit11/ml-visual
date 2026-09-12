@@ -1,0 +1,4 @@
+{
+  "buildCommand": "node scripts/gen-sitemap.mjs && npm run build",
+  "outputDirectory": "dist"
+}

@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>朴素贝叶斯 · 奇迹学习</title>
+    <meta
+      name="description"
+      content="贝叶斯定理 + 一个「天真」的独立假设，就能把 5574 条真实短信分出 97% 的垃圾短信。亲手试一条，看每个词各自贡献了多少。"
+    />
+    <link rel="canonical" href="https://www.godwit.asia/demos/naive-bayes/" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="奇迹学习" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:url" content="https://www.godwit.asia/demos/naive-bayes/" />
+    <meta property="og:title" content="朴素贝叶斯 · 奇迹学习" />
+    <meta
+      property="og:description"
+      content="贝叶斯定理 + 一个「天真」的独立假设，就能把 5574 条真实短信分出 97% 的垃圾短信。亲手试一条，看每个词各自贡献了多少。"
+    />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <nav class="nav">
+      <a class="nav-brand" href="../../"><span class="dot"></span>奇迹学习</a>
+      <span class="nav-spacer"></span>
+      <div class="nav-links"><a href="../../#demos">全部演示</a></div>
+      <button class="theme-toggle" data-theme-toggle aria-label="切换深浅色主题"></button>
+    </nav>
+
+    <div class="container">
+      <div class="page-head">
+        <div class="crumb"><a href="../../">首页</a> / 经典分类 / 朴素贝叶斯</div>
+        <h1>朴素贝叶斯：一个"错误"的假设，为什么这么好用</h1>
+        <p>
+          它假设「给定类别之后，每个词之间互相独立」——这个假设明显是错的
+          （"免费"和"中奖"明明总是成对出现）。但就是靠着这个错误假设，
+          5574 条真实短信里的垃圾短信，它判对了 <strong>97%</strong>。
+          这一页让你亲手改一条短信，看每个词各自把票投给了谁。
+        </p>
+      </div>
+
+      <div class="demo-layout">
+        <div>
+          <div class="panel">
+            <div class="panel-title">哪些词最像垃圾短信</div>
+            <div class="chart" id="chart-odds" style="height: 460px"></div>
+            <div class="ctrl-hint" style="margin-top: 8px">
+              横轴是一个词的<strong>对数几率比</strong>：
+              <span class="math" data-tex="\ln \dfrac{P(w \mid \text{spam})}{P(w \mid \text{ham})}"></span>。
+              往右的词越像垃圾短信，往左的越像正常短信。
+              <strong>claim</strong> 和 <strong>www</strong> 在这种数据里几乎是"一票定罪"。
+            </div>
+          </div>
+
+          <div class="panel" style="margin-top: var(--sp-4)">
+            <div class="panel-title">亲手试一条：看每个词各投了谁一票</div>
+
+            <textarea
+              id="sms-input"
+              class="sms-input"
+              rows="3"
+              spellcheck="false"
+              aria-label="短信内容"
+            ></textarea>
+
+            <div class="sms-samples" id="sms-samples"></div>
+
+            <div class="verdict" id="verdict"></div>
+
+            <div class="sms-breakdown" id="sms-breakdown"></div>
+
+            <div class="ctrl-hint" style="margin-top: 12px">
+              表格里每一行都是<strong>对数概率</strong>（越负越小），加起来就是判决分数。
+              两列最底下那个数一比较，谁大就判谁——差值再归一化成右边的概率。
+              注意<strong>「未出现的词」那一行</strong>：伯努利模型会把 150 个词里没出现的那些也计入，
+              这是它和多项式模型最本质的差别。
+            </div>
+          </div>
+
+          <div class="panel" data-tabs style="margin-top: var(--sp-4)">
+            <div class="tab-bar">
+              <button class="tab is-active" data-tab="code">代码</button>
+              <button class="tab" data-tab="theory">原理</button>
+              <button class="tab" data-tab="quiz">思考题</button>
+            </div>
+
+            <div class="tab-panel is-active" data-panel="code">
+              <div class="code-wrap" style="position: relative">
+                <pre class="code-block" id="code"></pre>
+                <button class="copy-btn" data-copy>复制</button>
+              </div>
+              <div class="callout callout-info" style="margin-top: 16px">
+                ①段是这一页自己跑出来的结果；②段是同一件事的 sklearn 写法。
+                本页的平滑、先验、对数概率都已与 sklearn 逐元素对拍过。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="theory">
+              <h3 style="font-size: 15px; margin-bottom: 8px">① 贝叶斯定理：把问题翻个面</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                想知道「这条短信是垃圾邮件的概率」，直接算很难。但训练数据能告诉我们相反方向的事：
+                「垃圾邮件里出现"免费"的概率」。贝叶斯定理把两者接起来：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="P(y \mid x) = \frac{P(x \mid y)\,P(y)}{P(x)}"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                分母 <span class="math" data-tex="P(x)"></span> 对所有类别都一样，
+                所以比较时可以直接丢掉。这就是为什么页面上的"判决分数"只有两部分：
+                <strong>类先验</strong> 和 <strong>似然</strong>。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">② "朴素"在哪：假装词与词无关</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                <span class="math" data-tex="x"></span> 是一整条短信（150 个词的出现与否）。
+                要算 <span class="math" data-tex="P(x \mid y)"></span>，得知道这 150 个位置的<strong>联合分布</strong>——
+                参数量是天文数字。于是朴素贝叶斯直接假设它们条件独立：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="P(x \mid y) = \prod_{i=1}^{d} P(x_i \mid y)"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                连乘取对数变求和，每个词就只需要一个概率：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="\log P(y \mid x) \;\propto\; \log P(y) + \sum_{i=1}^{d} \log P(x_i \mid y)"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                这个假设当然是错的。<strong>但它错得很"便宜"</strong>：
+                条件独立假设带来的偏差，是把每个词的证据重复计算了；
+                可好处是参数量从指数级降到线性级——150 个词只要估计 150 个数。
+                在文本分类这种"特征多、数据相对少"的场景里，这笔买卖非常划算。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">③ 伯努利还是多项式？</h3>
+              <p style="font-size: 13px; color: var(--text-2)">两种建模方式，差别只在 <span class="math" data-tex="P(x_i \mid y)"></span> 怎么算：</p>
+              <ul style="font-size: 13px; color: var(--text-2); padding-left: 1.2em">
+                <li>
+                  <strong>伯努利</strong>：特征只有"出现/不出现"。
+                  <span class="math" data-tex="P(x_i{=}1 \mid y)"></span> 用出现文档的比例估计，
+                  而<strong>没出现的词也要用 <span class="math" data-tex="1-p"></span> 计入</strong>。
+                  短信很短（平均命中 7.6 个词表词），"没出现"这个信息量很大——这就是这一页
+                  伯努利（97.2%）比多项式（96.6%）好的原因。
+                </li>
+                <li>
+                  <strong>多项式</strong>：特征是词频，只累加出现过的词。
+                  长文本（新闻、论文）上通常更合适，因为重复出现的词确实更该有更大话语权。
+                </li>
+              </ul>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">④ 平滑：不能有"一票否决"</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                <strong>claim</strong> 这个词在训练集里 spam 出现了 108 次、ham 出现了 <strong>0</strong> 次。
+                如果不做平滑，<span class="math" data-tex="P(\text{claim} \mid \text{ham}) = 0"></span>，
+                那么任何一条含 claim 的正常短信都会被判成垃圾——而且概率算出来是 0，
+                连"有多确信"都说不出来。所以所有计数都加一个 α：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="P(x_i \mid y) = \frac{\text{count}(x_i, y) + \alpha}{\text{count}(y) + \alpha \cdot d}"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                α = 1 就是常说的拉普拉斯平滑。α 太小容易过拟合，α 太大又会让所有词看起来差不多——
+                把右侧滑杆从 0.01 拖到 100，看准确率怎么变化。
+              </p>
+
+              <div class="callout callout-tip" style="margin-top: 16px">
+                <strong>先验有多重要？</strong>
+                这份语料里 spam 只占 13.4%，所以先验
+                <span class="math" data-tex="\log P(\text{spam}) = -2.01"></span>，
+                比 <span class="math" data-tex="\log P(\text{ham}) = -0.14"></span> 低了近 1.9。
+                也就是说，一条短信要"说服"模型把它判成垃圾，命中词带来的证据得先补上这 1.9 的缺口。
+                这正是朴素贝叶斯天然抗类别不平衡的方式——但也意味着阈值是跟着先验走的。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="quiz">
+              <details class="quiz">
+                <summary>1. "claim" 在训练集里 spam 出现 108 次、ham 出现 0 次，能不能说 P(spam | claim) = 1？</summary>
+                <div class="quiz-body">
+                  不能，这是典型的<strong>用频率冒充概率</strong>。
+                  108 次里 ham 一次都没出现，不一定代表世界上不存在含 claim 的正常短信，
+                  只是这份 5574 条的样本里恰好没有（或者被词表过滤掉了）。
+                  拉普拉斯平滑干的正是这件事：给没见过的组合一个很小的非零概率。
+                  不做平滑的话，只要出现一个训练集里没见过的词，整个后验概率就是 0，
+                  模型会变得极度自信又极度脆弱。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>2. 为什么伯努利模型要把"没出现的词"也算进分母？这在短信上有什么影响？</summary>
+                <div class="quiz-body">
+                  伯努利模型把每条文档看作<strong>对全部 d 个词各做一次"出现/不出现"的伯努利试验</strong>，
+                  所以似然是 <span class="math" data-tex="\prod p_i^{x_i}(1-p_i)^{1-x_i}"></span>——
+                  没出现的词贡献 <span class="math" data-tex="(1-p_i)"></span>，不能省。
+                  在短信上这个信息很有用：一条正常的短对话（"Ok lar... Joking wif u oni..."）
+                  命中词特别少，而 spam 词里那些（比如 claim、www）在 ham 里的出现率极低，
+                  于是"这些词没出现"本身就成了一条证据，把判定推向 ham。
+                  本页点开一条短信，看表格里"未出现的词"那一行——它往往贡献了好几个负分。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>3. 独立假设明显是错的（"免费"和"中奖"高度相关），为什么朴素贝叶斯还这么好用？</summary>
+                <div class="quiz-body">
+                  因为分类只关心<strong>哪个类别的分数更高</strong>，不关心概率值本身准不准。
+                  重复计算相关词的证据，会把两个类别的分数同时推高，很多时候<strong>排序不变</strong>。
+                  另一个角度是偏差-方差：独立假设给了模型很大的偏差（它错了），
+                  但把参数量从指数级砍到线性级，方差小得惊人——在数据量不占优的文本场景里，
+                  方差小往往比偏差小更值钱。这也解释了为什么它在小样本、高维稀疏特征上特别强，
+                  而在需要精确概率输出的场合就要谨慎。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>4. 把平滑系数 α 拖到最小（0.01）和最到大（100），准确率各会怎样？为什么？</summary>
+                <div class="quiz-body">
+                  本页实测：α 从 0.01 到 10 之间准确率一直稳在 96.6%~97.2%，变化很平缓，
+                  但 α=100 时开始明显下滑。原因是 α 太大会把所有 <span class="math" data-tex="P(x_i|y)"></span>
+                  都拉向同一个值，词与词之间的区分度被抹平，模型退化成"只看先验"。
+                  反过来 α 太小则容易过拟合到训练集里的偶然共现（比如某个词只出现在 1 条 spam 里，
+                  就会被当成强证据）。α 不能取 0——那既违反概率定义，也会让整条后验归零。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>5. 这一页只用了 150 个高频词，剩下 8000 多个词全丢了。丢掉它们意味着什么？</summary>
+                <div class="quiz-body">
+                  意味着模型只看到 54.6% 的 token。丢掉的词里既有无信息量的长尾，
+                  也有像 "guaranteed"、"urgent"、"£" 这样判别力极强的低频词。
+                  这正是文本分类的经典取舍：<strong>词表越大越能保留信息，但每个词的概率估计也越不可靠</strong>
+                  （低频词的频率噪声极大）。
+                  真实系统里通常配合停用词过滤、词形还原、TF-IDF 加权，
+                  或者干脆换用能处理稀有词的方法。可以用 <code>scripts/prepare_sms.py --top 400</code>
+                  重新生成数据，自己试一下词表变大后准确率怎么走。
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <aside>
+          <div class="panel">
+            <div class="panel-title">模型设置</div>
+
+            <div class="field">
+              <label for="sel-model">模型</label>
+              <select id="sel-model" class="select">
+                <option value="bernoulli">伯努利（词出现与否）</option>
+                <option value="multinomial">多项式（词频）</option>
+              </select>
+            </div>
+
+            <div class="stack" id="controls" style="margin-top: 12px"></div>
+
+            <div class="callout callout-tip" id="data-desc" style="margin-top: 14px"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">当前表现</div>
+            <div class="metric-grid" id="metrics"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">使用说明</div>
+            <ol style="font-size: 13px; color: var(--text-2); margin: 0; padding-left: 1.2em">
+              <li>先看最上面那张图：哪些词几乎"一票定罪"。</li>
+              <li>在输入框里改一句短信，或者点下面的示例，看判决怎么变。</li>
+              <li>把 <strong>claim</strong> 加进一句正常的话里试试——看它能不能扭转结论。</li>
+              <li>切换伯努利 / 多项式，对比右侧指标卡里的准确率。</li>
+            </ol>
+          </div>
+        </aside>
+      </div>
+
+      <div class="pager" id="pager"></div>
+    </div>
+
+    <footer class="footer">
+      <p>
+        可视化 ECharts · 公式 KaTeX · 朴素贝叶斯手写实现，类先验 / 特征对数概率 / 预测 /
+        对数后验概率已在 8 组配置下与 scikit-learn 逐元素对拍 ·
+        语料为 UCI SMS Spam Collection v.1（5574 条真实短信）
+      </p>
+    </footer>
+
+    <script type="module" src="../../src/pages/naiveBayes.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>聚类分析 · 奇迹学习</title>
+    <meta
+      name="description"
+      content="K-means 分派、更新、再分派：单步走一遍，看质心怎么一步步挪到簇心；也看它在同心圆上怎么彻底失败。"
+    />
+  </head>
+  <body>
+    <nav class="nav">
+      <a class="nav-brand" href="../../"><span class="dot"></span>奇迹学习</a>
+      <span class="nav-spacer"></span>
+      <div class="nav-links"><a href="../../#demos">全部演示</a></div>
+      <button class="theme-toggle" data-theme-toggle aria-label="切换深浅色主题"></button>
+    </nav>
+
+    <div class="container">
+      <div class="page-head">
+        <div class="crumb"><a href="../../">首页</a> / 无监督学习 / 聚类分析</div>
+        <h1>聚类分析：没有标签，怎么把数据分成堆</h1>
+        <p>
+          K-means 的全部内容就是两句话：<strong>把每个点分给最近的质心</strong>，
+          <strong>把每个质心挪到它那堆的中间</strong>。反复做，直到质心不动。
+          这一页可以一步一步走，看质心怎么挪；也可以切到同心圆，
+          看它怎么把一个明摆着的结构彻底切错。
+        </p>
+      </div>
+
+      <div class="demo-layout">
+        <div>
+          <div class="panel">
+            <div class="panel-title">聚类结果</div>
+            <div class="chart" id="chart-cluster"></div>
+            <div class="ctrl-hint" style="margin-top: 8px" id="cluster-hint"></div>
+          </div>
+
+          <div class="chart-row" style="margin-top: var(--sp-4)">
+            <div class="panel">
+              <div class="panel-title">inertia 随迭代下降</div>
+              <div class="chart-sm" id="chart-inertia" style="height: 300px"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-title">当前状态</div>
+              <div class="metric-grid" id="metrics"></div>
+              <div class="ctrl-hint" id="train-status" style="margin-top: 10px"></div>
+            </div>
+          </div>
+
+          <div class="panel" data-tabs style="margin-top: var(--sp-4)">
+            <div class="tab-bar">
+              <button class="tab is-active" data-tab="code">代码</button>
+              <button class="tab" data-tab="theory">原理</button>
+              <button class="tab" data-tab="quiz">思考题</button>
+            </div>
+
+            <div class="tab-panel is-active" data-panel="code">
+              <div class="code-wrap" style="position: relative">
+                <pre class="code-block" id="code"></pre>
+                <button class="copy-btn" data-copy>复制</button>
+              </div>
+              <div class="callout callout-info" style="margin-top: 16px">
+                这一页的 K-means 是自己实现的，<strong>labels / 簇中心 / inertia 与 sklearn 逐项对拍过</strong>
+                （给定相同的初始质心后，整个过程是完全确定的）。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="theory">
+              <h3 style="font-size: 15px; margin-bottom: 8px">① 它在最小化什么</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                聚类的目标可以写得非常朴素：让每个点到它所属簇中心的距离平方和尽可能小。
+                这个量叫 <strong>inertia</strong>（簇内平方和）：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="J = \sum_{i=1}^{n} \big\| x_i - \mu_{c(i)} \big\|^2"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                右侧那张图画的正是它——每次都只会往下走，不会往上，所以算法一定能停。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">② 两步交替 = 坐标下降</h3>
+              <ul style="font-size: 13px; color: var(--text-2); padding-left: 1.2em">
+                <li>
+                  <strong>分派</strong>：固定所有质心，把每个点归给最近的那个。
+                  这一步求的是「给定质心，最优的分派是什么」——每个点独立，直接取最近即可。
+                </li>
+                <li>
+                  <strong>更新</strong>：固定分派，把每个质心挪到它那一簇的<strong>均值</strong>位置。
+                  这一步求的是「给定分派，最优的质心在哪」——均值的平方和最小，这是可以严格证明的。
+                </li>
+              </ul>
+              <p style="font-size: 13px; color: var(--text-2)">
+                两步都在把 <span class="math" data-tex="J"></span> 往下压，所以
+                <strong>J 单调不增、算法必然收敛</strong>。但注意：每一步都是"固定另一半"的最优，
+                合起来只能保证停在<strong>局部</strong>最优——这就是它挑初始质心的根本原因。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">③ 为什么它只会切直线</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                「分给最近的质心」这个规则，在平面上等价于<strong>用直线把空间切开</strong>
+                （两个质心连线的垂直平分线）。所以 K-means 的每个簇一定是凸的、大致等大的。
+              </p>
+              <p style="font-size: 13px; color: var(--text-2)">
+                切到「同心圆」看看：内圈和外圈明明是天然的两簇，K-means 却会把外圈劈成两半——
+                因为"平分"比"套一个环"更符合它的规则。想聚类这种结构得换方法
+                （谱聚类、DBSCAN 之类）。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">④ 两个必须做的工程处理</h3>
+              <ul style="font-size: 13px; color: var(--text-2); padding-left: 1.2em">
+                <li>
+                  <strong>标准化特征</strong>：inertia 是欧氏距离，量纲差 100 倍时
+                  大的那个特征会完全支配结果。这一页的鸢尾花数据没做标准化，
+                  因为它的两个特征本来就是同一个量纲（厘米）。
+                </li>
+                <li>
+                  <strong>跑多次取最优（n_init）</strong>：算法只保证局部最优，
+                  所以实践中要跑十几次不同起点、取 inertia 最小的那个。
+                  点「换个起点」能看到同一份数据跑出不同的结果。
+                </li>
+              </ul>
+
+              <div class="callout callout-tip" style="margin-top: 16px">
+                <strong>k-means++ 是干什么的？</strong>
+                随机撒 k 个点当初始质心，很容易撒出两个挨在一起的坏起点。
+                k-means++ 的做法是：第一个质心随机，之后每个新质心<strong>按"到已有质心的距离平方"
+                成正比的概率</strong>来抽——离得越远越容易被选上。于是初始质心天然分散，
+                这一步几乎不花额外时间，却显著减少"跑出烂结果"的概率。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="quiz">
+              <details class="quiz">
+                <summary>1. 为什么 K-means 在同心圆上会输得那么难看？</summary>
+                <div class="quiz-body">
+                  因为它的分派规则是「离哪个质心最近」，而这在平面上等价于<strong>用直线切空间</strong>。
+                  内外两个圈的正确划分是一条闭合曲线，K-means 的假设空间里根本没有这种形状。
+                  它退而求其次，用两条近似竖直的线把数据砍成三块——看起来"合理"，
+                  但和真实结构毫无关系。这不是参数没调好，是<strong>模型假设不匹配</strong>。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>2. 为什么 inertia 一定单调不增？反过来说，这保证了什么、又不保证什么？</summary>
+                <div class="quiz-body">
+                  分派那一步：给定质心，每个点选最近的，任何别的选法都不会更小——
+                  所以分派之后 J 不增。更新那一步：给定分派，质心取均值时 J 最小
+                  （把 <span class="math" data-tex="\sum\|x_i - \mu\|^2"></span> 对 μ 求导等于 0
+                  就得到 μ = 均值）——所以更新之后 J 也不增。
+                  这保证了<strong>算法一定会在有限步内停下</strong>（J 有下界 0，且取值离散）。
+                  但不保证停在<strong>全局</strong>最优——只保证是个"没有单步改进余地"的谷底。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>3. 页面上点「换个起点」，同一份数据结果就变了。这算 bug 吗？该怎么办？</summary>
+                <div class="quiz-body">
+                  不算 bug，这是 K-means 的固有性质。办法有三条，实践中通常一起用：
+                  ① <strong>k-means++</strong> 初始化（比纯随机好很多）；
+                  ② <strong>n_init</strong>：跑十几次取 inertia 最小的；
+                  ③ 如果数据形状本来就不适合 K-means，换算法。
+                  值得注意的是：<strong>inertia 更小不代表聚得更有意义</strong>——
+                  它可以靠把一个自然的簇拆成两半来降低 inertia，但那不是你想看到的结果。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>4. k 该怎么选？页面上把 k 从 1 拖到 8，inertia 一直在降，那岂不是越大越好？</summary>
+                <div class="quiz-body">
+                  inertia 随 k 单调下降（k 越大每个簇越小，当然更"紧"），
+                  极端情况 k = n 时 inertia = 0——但那毫无意义。
+                  常用办法是<strong>肘部法则</strong>：画 inertia 对 k 的曲线，
+                  找"下降速度突然变缓"的那个拐点。更严谨一点的用<strong>轮廓系数</strong>
+                  （同时考虑簇内紧密度和簇间分离度）。
+                  但最根本的判据还是业务：分出来的这几堆，有没有实际意义。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>5. 鸢尾花那组数据有真实品种标签，页面上的「纯度」是什么意思？</summary>
+                <div class="quiz-body">
+                  聚类本来没有"正确答案"，但如果手头恰好有真实标签（比如鸢尾花的三个品种），
+                  就可以衡量"聚出来的簇和真实分类有多吻合"。
+                  纯度的算法很简单：<strong>每个簇认领其中最多的那个真实类别，
+                  正确数加起来除以总数</strong>。它不关心簇的编号（簇 0 叫什么无所谓），
+                  所以适合评价无监督结果。<br/>
+                  本页在鸢尾花上 k=3 时的纯度是 <strong>0.9467</strong>——其中 setosa 那一簇
+                  完完全全 50/50 纯（它在花瓣尺寸上和另外两个品种分得很开），
+                  剩下 versicolor 和 virginica 本来就重叠，K-means 只能做到这个程度。
+                  这也说明：<strong>纯度是个有用的参照，但它衡量的是"和已知标签吻合多少"，
+                  不是"聚类本身好不好"</strong>。
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <aside>
+          <div class="panel">
+            <div class="panel-title">聚类设置</div>
+
+            <div class="field">
+              <label for="sel-data">数据集</label>
+              <select id="sel-data" class="select"></select>
+            </div>
+
+            <div class="field" style="margin-top: 12px">
+              <label for="sel-init">初始化方式</label>
+              <select id="sel-init" class="select">
+                <option value="kmeans++">k-means++（推荐）</option>
+                <option value="random">纯随机撒点</option>
+              </select>
+            </div>
+
+            <div class="stack" id="controls" style="margin-top: 12px"></div>
+
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px">
+              <button class="btn btn-primary" id="btn-run">跑完</button>
+              <button class="btn" id="btn-step">走一步</button>
+              <button class="btn" id="btn-restart">换个起点</button>
+              <button class="btn" id="btn-reset">重置</button>
+            </div>
+
+            <div class="callout callout-tip" id="data-desc" style="margin-top: 14px"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">使用说明</div>
+            <ol style="font-size: 13px; color: var(--text-2); margin: 0; padding-left: 1.2em">
+              <li>先点「重置」，然后一次一次点「走一步」，看质心怎么挪。</li>
+              <li>盯右边的 inertia：它每一步都在降，从不反弹。</li>
+              <li>点「换个起点」，同一个 k 跑出不同的划分——这就是局部最优。</li>
+              <li>切到「同心圆」，看它怎么把一个明摆着的结构切错。</li>
+            </ol>
+          </div>
+        </aside>
+      </div>
+
+      <div class="pager" id="pager"></div>
+    </div>
+
+    <footer class="footer">
+      <p>
+        可视化 ECharts · 公式 KaTeX · K-means 手写实现（含 k-means++ 与空簇重定位），
+        labels / 簇中心 / inertia 已在 24 组配置下与 scikit-learn 逐项对拍 ·
+        鸢尾花数据来自 sklearn.datasets
+      </p>
+    </footer>
+
+    <script type="module" src="../../src/pages/clustering.ts"></script>
+  </body>
+</html>

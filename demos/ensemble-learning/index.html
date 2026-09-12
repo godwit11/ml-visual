@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>集成学习 · 奇迹学习</title>
+    <meta
+      name="description"
+      content="Bagging 与 AdaBoost：一个靠平均降方差，一个靠纠错降偏差。单步添加基学习器，看决策边界一刀一刀被修出来。"
+    />
+    <link rel="canonical" href="https://www.godwit.asia/demos/ensemble-learning/" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="奇迹学习" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:url" content="https://www.godwit.asia/demos/ensemble-learning/" />
+    <meta property="og:title" content="集成学习 · 奇迹学习" />
+    <meta
+      property="og:description"
+      content="Bagging 与 AdaBoost：一个靠平均降方差，一个靠纠错降偏差。单步添加基学习器，看决策边界一刀一刀被修出来。"
+    />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <nav class="nav">
+      <a class="nav-brand" href="../../"><span class="dot"></span>奇迹学习</a>
+      <span class="nav-spacer"></span>
+      <div class="nav-links"><a href="../../#demos">全部演示</a></div>
+      <button class="theme-toggle" data-theme-toggle aria-label="切换深浅色主题"></button>
+    </nav>
+
+    <div class="container">
+      <div class="page-head">
+        <div class="crumb"><a href="../../">首页</a> / 树与集成 / 集成学习</div>
+        <h1>集成学习：三个臭皮匠，到底怎么凑成诸葛亮</h1>
+        <p>
+          单个决策桩（只能横着或竖着切一刀）在月牙上只有 88% 的准确率。
+          把 30 个桩组合起来，可以到 99%。但<strong>组合的方式有两种，逻辑完全不同</strong>：
+          Bagging 让它们各自独立做题再投票，AdaBoost 让后一个专门补前一个的漏。
+          这一页把两种方式的边界一笔一笔画出来。
+        </p>
+      </div>
+
+      <div class="demo-layout">
+        <div>
+          <div class="panel">
+            <div class="panel-title">决策边界：<span id="boundary-title">Bagging</span></div>
+            <div class="chart" id="chart-boundary"></div>
+            <div class="ctrl-hint" style="margin-top: 8px" id="boundary-hint"></div>
+          </div>
+
+          <div class="chart-row" style="margin-top: var(--sp-4)">
+            <div class="panel">
+              <div class="panel-title">准确率随基学习器数量怎么走</div>
+              <div class="chart-sm" id="chart-curve" style="height: 300px"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-title">当前集成</div>
+              <div class="metric-grid" id="metrics"></div>
+              <div class="ctrl-hint" id="train-status" style="margin-top: 10px"></div>
+            </div>
+          </div>
+
+          <div class="panel" data-tabs style="margin-top: var(--sp-4)">
+            <div class="tab-bar">
+              <button class="tab is-active" data-tab="code">代码</button>
+              <button class="tab" data-tab="theory">原理</button>
+              <button class="tab" data-tab="quiz">思考题</button>
+            </div>
+
+            <div class="tab-panel is-active" data-panel="code">
+              <div class="code-wrap" style="position: relative">
+                <pre class="code-block" id="code"></pre>
+                <button class="copy-btn" data-copy>复制</button>
+              </div>
+              <div class="callout callout-info" style="margin-top: 16px">
+                ①段是这一页自己实现的逻辑；②段是 sklearn 的等价写法。
+                两种集成的<b>加权错误率</b>与 <b>发言权 α</b> 都已与 sklearn 逐轮对拍过。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="theory">
+              <h3 style="font-size: 15px; margin-bottom: 8px">① 为什么要集成：把误差拆成两半</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                模型的泛化误差可以粗略拆成<strong>偏差</strong>（系统性地错在哪）和
+                <strong>方差</strong>（换个训练集就换个答案）。两种集成各治一头：
+              </p>
+              <ul style="font-size: 13px; color: var(--text-2); padding-left: 1.2em">
+                <li>
+                  <strong>Bagging 降方差</strong>：每棵树看一份自助采样（有放回）的数据，
+                  彼此独立。平均起来，各自的随机波动互相抵消。
+                  所以 Bagging 特别适合<strong>深而复杂</strong>的基学习器。
+                </li>
+                <li>
+                  <strong>Boosting 降偏差</strong>：每轮盯着上一轮做错的样本加大权重，
+                  新基学习器专门补强。所以 Boosting 适合<strong>简单</strong>的基学习器
+                  （本页默认就是只能切一刀的决策桩）。
+                </li>
+              </ul>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">② Bagging：平均的力量</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                假设有 <span class="math" data-tex="M"></span> 个<strong>相互独立</strong>、
+                方差都是 <span class="math" data-tex="\sigma^2"></span> 的模型，
+                平均之后的方差是：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="\mathrm{Var}\left(\tfrac{1}{M}\sum_{m} f_m\right) = \frac{\sigma^2}{M}"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                这是 Bagging 的全部理论。它有两个前提：模型要<strong>足够独立</strong>
+                （所以要有随机采样），以及<strong>平均不会破坏准确性</strong>
+                （所以基学习器不能太弱）。现实中样本有限，树之间总有关联，
+                降方差的效果会打折——但方向是对的。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">③ AdaBoost：给做错的题加权重</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                每一轮的流程只有四步：
+              </p>
+              <span
+                class="math"
+                data-display
+                data-tex="\varepsilon_t = \frac{\sum_i w_i^{(t)}\,\mathbb{1}[h_t(x_i) \ne y_i]}{\sum_i w_i^{(t)}}, \qquad \alpha_t = \ln\frac{1-\varepsilon_t}{\varepsilon_t} + \ln(K-1)"
+              ></span>
+              <span
+                class="math"
+                data-display
+                data-tex="w_i^{(t+1)} = w_i^{(t)} \cdot \exp\!\big(\alpha_t\,\mathbb{1}[h_t(x_i) \ne y_i]\big)"
+              ></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                ①算这一轮的<strong>加权错误率</strong> ε；
+                ②换算成<strong>发言权</strong> α——错得越少说话越响，
+                但 ε = 0.5（和瞎猜一样）时 α = 0，直接作废；
+                ③把答错的样本权重乘上 <span class="math" data-tex="e^{\alpha}"></span> 放大；
+                ④归一化，进入下一轮。
+              </p>
+              <p style="font-size: 13px; color: var(--text-2)">
+                最终预测是按 α 加权投票：
+                <span class="math" data-tex="H(x) = \arg\max_k \sum_t \alpha_t\,\mathbb{1}[h_t(x) = k]"></span>。
+                页面上圆点的大小画的就是当前样本权重——你会看到被错分的点一轮轮变大。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">④ 两者的差别，一句话</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                还有一个容易被误读的地方：AdaBoost 下右侧那个「单棵树平均」<strong>会比 Bagging 低很多</strong>
+                （月牙上实测 66% vs 83%）。这不是实现有问题——那些树是<strong>偏科生</strong>：
+                越到后面，它们越专门盯着被放大权重的难分点训练，在整体数据上自然一塌糊涂。
+                正因为每棵树只负责一小块局部，最后才必须按 α 加权投票把它们拼起来。
+              </p>
+              <div class="callout callout-tip" style="margin-top: 8px">
+                <strong>Bagging 把弱点的权重均摊，Boosting 把弱点的权重集中。</strong>
+                所以 Bagging 要很多棵树才能看出效果（曲线缓慢上升后饱和），
+                Boosting 往往几轮就见效——但也更容易<strong>被噪声点带偏</strong>：
+                一个标错的样本会被反复放大权重，拉着边界往它那儿跑。这就是 Boosting 对
+                异常值比 Bagging 敏感得多的原因。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="quiz">
+              <details class="quiz">
+                <summary>1. 为什么 Bagging 常用「深树」而 Boosting 常用「浅树」？</summary>
+                <div class="quiz-body">
+                  因为两者治的毛病不一样。Bagging 治<strong>方差</strong>：
+                  深树方差大（换个训练集就长得面目全非），平均正好压住它。
+                  如果基学习器本身就很简单（低方差），Bagging 没什么可治的。
+                  Boosting 治<strong>偏差</strong>：它靠"后一个补前一个的漏"，
+                  基学习器必须够简单，才能被稳步纠正；如果每个基学习器都很强、
+                  已经拟合得七七八八，后面的轮次就没什么可补的，反而容易一起过拟合。
+                  页面上可以把基学习器深度拖到 4 再切到 AdaBoost 试试——性能未必更好。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>2. 本页的 AdaBoost 用「只能切一刀的桩」，为什么反而能画出月牙这种弯曲边界？</summary>
+                <div class="quiz-body">
+                  因为每个桩都是<strong>轴平行的半平面切分</strong>。
+                  把这些切分按不同权重叠加起来（"或"的关系），就能逼近任意复杂的区域——
+                  这正是决策树的思路，只不过 AdaBoost 是<strong>按错误率决定每一刀的重要程度</strong>。
+                  30 个桩加上正确的权重，就能把月牙围出来。
+                  也可以反过来看：一棵深度 5 的树也能做到，但 AdaBoost 用一堆浅模型
+                  达到了差不多的效果，而且每一步都容易解释。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>3. 当某一轮的加权错误率 ε 恰好等于 0.5（和瞎猜一样），α 会等于多少？</summary>
+                <div class="quiz-body">
+                  <span class="math" data-tex="\alpha = \ln\frac{1-0.5}{0.5} = \ln 1 = 0"></span>。
+                  这说明这一轮的基学习器<strong>彻底没用</strong>，发言权为零，对最终投票没有任何影响。
+                  所以实现里必须处理这件事：α ≤ 0 时要么跳过、要么直接停止（sklearn 是停止）。
+                  另一个极端是 ε → 0，此时 α → +∞——所以 ε 通常会被加上一个极小的下限，
+                  防止数值爆炸。本页的对拍里就专门覆盖了这两种边界。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>4. 页面上那张「准确率随基学习器数量」的曲线，Bagging 和 AdaBoost 形状有什么不同？</summary>
+                <div class="quiz-body">
+                  Bagging 通常是<strong>快速上升然后平掉</strong>：前几棵树把明显的结构抓住，
+                  之后加的树提供的多是重复信息（因为自助采样之间高度相关），
+                  边际收益迅速衰减。AdaBoost 则更"贪心"：
+                  每一轮都在针对性地修上一轮的错误，所以早期上升往往更陡，
+                  但后期可能因为过度关注少数难分点而<strong>先升后降</strong>（过拟合）。
+                  在页面上把数量从 1 拖到 30，两种算法的曲线放在一起看最直观。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>5. AdaBoost 里那个「被反复放大权重的样本」，如果本身是个标错的标签呢？</summary>
+                <div class="quiz-body">
+                  那它就成了一场灾难：模型会不惜扭曲整个边界去迁就这一个错误的点，
+                  因为每轮它都被放大 <span class="math" data-tex="e^{\alpha}"></span> 倍。
+                  这就是 <strong>Boosting 对噪声和异常值特别敏感</strong>的原因，
+                  也是现实中常见做法的由来：先用 Bagging（比如随机森林）拿一个对噪声更稳的基线，
+                  或者在 Boosting 里限制每轮的 α、降低学习率（learning rate &lt; 1）。
+                  想知道具体长什么样，可以在「月牙」上把基学习器深度开到 4、
+                  数量开到 30，看边界是怎么被少数几个点拽歪的。
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <aside>
+          <div class="panel">
+            <div class="panel-title">集成设置</div>
+
+            <div class="field">
+              <label for="sel-data">数据集</label>
+              <select id="sel-data" class="select"></select>
+            </div>
+
+            <div class="field" style="margin-top: 12px">
+              <label for="sel-algo">集成方式</label>
+              <select id="sel-algo" class="select">
+                <option value="bagging">Bagging（并行 + 投票）</option>
+                <option value="boosting">AdaBoost（串行 + 纠错）</option>
+              </select>
+            </div>
+
+            <div class="stack" id="controls" style="margin-top: 12px"></div>
+
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px">
+              <button class="btn" id="btn-add">加一个基学习器</button>
+              <button class="btn" id="btn-reset">重置</button>
+            </div>
+
+            <div class="callout callout-tip" id="data-desc" style="margin-top: 14px"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">使用说明</div>
+            <ol style="font-size: 13px; color: var(--text-2); margin: 0; padding-left: 1.2em">
+              <li>先把「基学习器数量」停在 1，看清单个决策桩有多寒酸。</li>
+              <li>点「加一个基学习器」，一次一次加，盯边界怎么变。</li>
+              <li>切到 AdaBoost，看圆点大小（样本权重）怎么被错分的点撑大。</li>
+              <li>把深度调到 4 再看 AdaBoost——它反而可能变差，想想为什么。</li>
+            </ol>
+          </div>
+        </aside>
+      </div>
+
+      <div class="pager" id="pager"></div>
+    </div>
+
+    <footer class="footer">
+      <p>
+        可视化 ECharts · 公式 KaTeX · Bagging 与 AdaBoost（SAMME）手写实现，
+        逐轮加权错误率 / 发言权 α / 权重更新 / 投票结果已与 scikit-learn 1.9 在 8 组配置下对拍
+      </p>
+    </footer>
+
+    <script type="module" src="../../src/pages/ensembleLearning.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>神经网络（MLP）· 奇迹学习</title>
+    <meta
+      name="description"
+      content="反向传播到底是什么：亲手掰弯决策边界，看没有激活函数时多层如何退化成一条直线，也看 sigmoid 在深层网络里怎样把梯度吃光。"
+    />
+    <link rel="canonical" href="https://www.godwit.asia/demos/neural-network/" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="奇迹学习" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:url" content="https://www.godwit.asia/demos/neural-network/" />
+    <meta property="og:title" content="神经网络（MLP）· 奇迹学习" />
+    <meta
+      property="og:description"
+      content="反向传播到底是什么：亲手掰弯决策边界，看没有激活函数时多层如何退化成一条直线，也看 sigmoid 在深层网络里怎样把梯度吃光。"
+    />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <nav class="nav">
+      <a class="nav-brand" href="../../"><span class="dot"></span>奇迹学习</a>
+      <span class="nav-spacer"></span>
+      <div class="nav-links"><a href="../../#demos">全部演示</a></div>
+      <button class="theme-toggle" data-theme-toggle aria-label="切换深浅色主题"></button>
+    </nav>
+
+    <div class="container">
+      <div class="page-head">
+        <div class="crumb"><a href="../../">首页</a> / 监督学习 / 神经网络</div>
+        <h1>神经网络：一层不够，是因为世界不是直的</h1>
+        <p>
+          逻辑回归只能切一条直线；<strong>神经网络的每一层都在把坐标掰弯一次</strong>，
+          弯到一定程度，直线就够用了。整件事只有两步：
+          <strong>前向传播</strong>把输入逐层拧过去，
+          <strong>反向传播</strong>回头问每个参数"这次错你占几分责任"，然后照责任大小修一小步。
+          反向传播不是新数学，它就是<strong>链式法则 + 一个聪明的计算顺序</strong>。
+          这一页可以亲手加层、换激活函数、调学习率，看决策边界怎么变。
+        </p>
+      </div>
+
+      <div class="demo-layout">
+        <div>
+          <div class="panel">
+            <div class="panel-title">决策边界：网络学会了怎样划分这块平面</div>
+            <div class="chart" id="chart-space"></div>
+            <div class="ctrl-hint" style="margin-top: 8px" id="space-hint"></div>
+          </div>
+
+          <div class="chart-row" style="margin-top: var(--sp-4)">
+            <div class="panel">
+              <div class="panel-title">训练曲线：损失怎么降下来的</div>
+              <div class="chart-sm" id="chart-loss" style="height: 300px"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-title">当前网络的状况</div>
+              <div class="metric-grid" id="metrics"></div>
+              <div class="ctrl-hint" id="train-status" style="margin-top: 10px"></div>
+            </div>
+          </div>
+
+          <div class="panel" data-tabs style="margin-top: var(--sp-4)">
+            <div class="tab-bar">
+              <button class="tab is-active" data-tab="code">代码</button>
+              <button class="tab" data-tab="theory">原理</button>
+              <button class="tab" data-tab="quiz">思考题</button>
+            </div>
+
+            <div class="tab-panel is-active" data-panel="code">
+              <div class="code-wrap" style="position: relative">
+                <pre class="code-block" id="code"></pre>
+                <button class="copy-btn" data-copy>复制</button>
+              </div>
+              <div class="callout callout-info" style="margin-top: 16px">
+                这一页的 MLP 是自己实现的——前向传播、<strong>反向传播</strong>、
+                mini-batch SGD、Xavier 初始化全是手写，没有用任何深度学习框架。
+                两组判据同时把关：<strong>把权重塞进 sklearn 比前向概率</strong>（差 ±2.2e-16）、
+                <strong>解析梯度对数值梯度</strong>（相对误差 1e-8 量级）。
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="theory">
+              <h3 style="font-size: 15px; margin-bottom: 8px">① 前向传播：每层就是"加权求和 + 掰弯"</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                第 <span class="math" data-tex="l"></span> 层做的事就两行：
+              </p>
+              <span class="math" data-display data-tex="z^{(l)} = a^{(l-1)} W^{(l)} + b^{(l)}, \qquad a^{(l)} = f\big(z^{(l)}\big)"></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                第一行是<strong>线性变换</strong>：把上一层的输出重新加权组合。
+                第二行是<strong>非线性激活</strong>
+                <span class="math" data-tex="f"></span>：把结果掰弯。
+              </p>
+              <div class="callout callout-tip" style="margin: 12px 0">
+                <strong>关键：非线性的来源是激活函数，不是层数。</strong>
+                如果 <span class="math" data-tex="f"></span> 是恒等映射，那
+                <span class="math" data-tex="a^{(2)} = a^{(0)}W^{(1)}W^{(2)} + \dots"></span>
+                ——两层复合起来仍是一个线性变换，等于白加。
+                把页面的激活函数切到「线性（无激活）」，数据集切到「异或」试试：
+                <strong>不管加多深多宽，准确率都上不去</strong>，
+                损失恒等于 <span class="math" data-tex="\ln 2 \approx 0.693"></span>
+                （这正是"完全无信息"的值）。
+              </div>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">② 反向传播：链式法则 + 聪明的顺序</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                要给每个参数算出"该往哪修"，本质就是对损失求偏导。笨办法是一个参数一个参数地
+                求，参数量一大就彻底算不动（复杂度是参数量的平方）。
+              </p>
+              <p style="font-size: 13px; color: var(--text-2)">
+                反向传播的关键观察是：<strong>第 <span class="math" data-tex="l"></span> 层的梯度
+                可以由第 <span class="math" data-tex="l+1"></span> 层的梯度推出来</strong>。
+                所以从输出层往回走一遍就够了，每层的梯度都复用上一层的结果：
+              </p>
+              <span class="math" data-display data-tex="\delta^{(out)} = \frac{\partial L}{\partial z^{(out)}} = \frac{p - y}{n}, \qquad \delta^{(l)} = \big(\delta^{(l+1)} W^{(l+1)\top}\big) \odot f'\!\big(z^{(l)}\big)"></span>
+              <p style="font-size: 13px; color: var(--text-2)">
+                拿到每层的 <span class="math" data-tex="\delta"></span> 后，权重梯度就是
+                <span class="math" data-tex="\mathrm{d}W^{(l)} = a^{(l-1)\top}\delta^{(l)}"></span>，
+                偏置梯度是 <span class="math" data-tex="\mathrm{d}b^{(l)} = \sum \delta^{(l)}"></span>。
+              </p>
+              <p style="font-size: 13px; color: var(--text-2)">
+                注意 <span class="math" data-tex="(p - y)"></span> 这个结果<strong>干净得可疑</strong>，
+                但它不是巧合：sigmoid 的导数里那个
+                <span class="math" data-tex="p(1-p)"></span> 项，正好和交叉熵求导产生的
+                <span class="math" data-tex="1/p"></span> 项互相抵消了。
+                这正是<strong>分类任务几乎总用交叉熵而不是 MSE</strong> 的原因——
+                用交叉熵时输出层误差就是简单的"预测减真值"，梯度不会在饱和区被压成 0。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">③ 激活函数：为什么现在几乎都用 ReLU</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                三种激活函数在这一页都能选。它们在<strong>深层网络</strong>里的差别非常悬殊，
+                我们用 8 层网络量了一下第一层拿到的梯度相对最后一层小多少：
+              </p>
+              <ul style="font-size: 13px; color: var(--text-2); margin: 8px 0; padding-left: 1.3em">
+                <li><strong>线性（无激活）</strong>：比值 ≈ 0.52，但整个网络退化成线性模型，没有表达力。</li>
+                <li><strong>tanh</strong>：比值 ≈ 0.58，衰减不明显——比传说中好得多。</li>
+                <li><strong>ReLU</strong>：比值 ≈ 0.90，几乎不衰减，这就是它成为默认选择的理由。</li>
+                <li><strong>logistic (sigmoid)</strong>：比值 ≈ <strong>5.9 × 10⁻⁷</strong>——
+                  第一层的梯度比最后一层小了<strong>六个数量级</strong>，等于没在学。</li>
+              </ul>
+              <div class="callout callout-warn" style="margin: 12px 0">
+                这就是<strong>梯度消失</strong>的真身。但它<strong>只发生在饱和型激活</strong>上：
+                sigmoid 在两端导数趋近 0，连乘几十次就没了。
+                所以「层数多就梯度消失」这个说法并不准确——ReLU 就不怎么受影响。
+                把页面隐层堆到 4 层、激活选 logistic，再对比 ReLU，能直接看出学习速度的差距。
+              </div>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">④ 二分类的输出层：1 个 logit + sigmoid</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                一个容易搞错的细节：<strong>二分类时输出层只有 1 个神经元</strong>，不是 2 个。
+                它输出一个 logit <span class="math" data-tex="z"></span>，再用 sigmoid 压成
+                <span class="math" data-tex="P(y=1) = \sigma(z)"></span>，
+                而 <span class="math" data-tex="P(y=0) = 1 - \sigma(z)"></span>。
+                两类概率天生互补，没必要用两个自由的数去描述。
+              </p>
+              <p style="font-size: 13px; color: var(--text-2)">
+                <strong>多分类</strong>才用 softmax 输出 K 个 logit。这两者形式不同，
+                但对拍时必须分清楚——本页脚本专门验证了这一点：
+                我的 sigmoid 结果和 sklearn 差 <span class="math" data-tex="2.2\times10^{-16}"></span>，
+                而强行 softmax 的结果和 sklearn 差了 0.467，差得非常远。
+              </p>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">⑤ 学习率和数据尺度是绑在一起的</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                把数据集切到「鸢尾花」，然后把学习率往上拉，你会看到准确率突然垮掉。
+                我们在这份数据上跑了一组对照（结构 <span class="math" data-tex="4{-}8{-}3"></span>，
+                每个学习率跑 12 个随机种子，看有几个能训到 90% 以上）：
+              </p>
+              <div style="font-size: 13px; color: var(--text-2); margin: 8px 0">
+                <table style="width: 100%; border-collapse: collapse; font-size: 12.5px">
+                  <thead>
+                    <tr style="border-bottom: 1px solid var(--border)">
+                      <th style="text-align: left; padding: 4px 6px">学习率</th>
+                      <th style="text-align: right; padding: 4px 6px">成功种子</th>
+                      <th style="text-align: right; padding: 4px 6px">平均准确率</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td style="padding: 3px 6px">0.01</td><td style="text-align: right">12 / 12</td><td style="text-align: right">97.1%</td></tr>
+                    <tr><td style="padding: 3px 6px">0.05</td><td style="text-align: right">12 / 12</td><td style="text-align: right">96.0%</td></tr>
+                    <tr><td style="padding: 3px 6px">0.1（本页默认）</td><td style="text-align: right">10 / 12</td><td style="text-align: right">93.1%</td></tr>
+                    <tr style="color: #dc2626"><td style="padding: 3px 6px"><strong>0.2</strong></td><td style="text-align: right"><strong>0 / 12</strong></td><td style="text-align: right">52.8%</td></tr>
+                    <tr style="color: #dc2626"><td style="padding: 3px 6px"><strong>0.3 及以上</strong></td><td style="text-align: right"><strong>0 / 12</strong></td><td style="text-align: right">33.3%</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="callout callout-warn" style="margin: 12px 0">
+                注意 <span class="math" data-tex="0.2"></span> 那里是一道<strong>悬崖</strong>，
+                不是缓坡：<span class="math" data-tex="0.1"></span> 还能到 93%，
+                翻到 <span class="math" data-tex="0.2"></span> 就 12 个种子全军覆没。
+                失败时的准确率 <span class="math" data-tex="33.3\%"></span>
+                正是"三类各占 1/3"，损失精确等于
+                <span class="math" data-tex="\ln 3 \approx 1.0986"></span>
+                —— 网络完全没在学。<br/><br/>
+                原因不是实现错了，是<strong>数据尺度</strong>：
+                二维玩具数据都落在 <span class="math" data-tex="[-1,1]"></span> 附近，
+                而鸢尾花是<strong>原始量纲</strong>（萼片长 4.3~7.9、花瓣宽 0.1~2.5，
+                差了近两个数量级），梯度大得多，同样的步长就迈过头了。
+                <br/><br/>
+                这就是实践中"<strong>先标准化，再调学习率</strong>"的原因。
+                真实项目里更省事的做法是标准化 + 自适应优化器（Adam），
+                它会给每个参数单独缩放步长，对量纲没那么敏感。
+              </div>
+
+              <h3 style="font-size: 15px; margin: 20px 0 8px">⑥ 别忘了：损失在降，不代表模型是对的</h3>
+              <p style="font-size: 13px; color: var(--text-2)">
+                这一页开发时踩过一个值得记下的坑：反向传播里我把 one-hot 的<strong>第 0 列</strong>
+                当成了 sigmoid 的目标值，于是真实标签为 1 时目标变成了 0
+                ——网络被训成了"每次都预测反的"。损失照样从 0.69 一路降到 0.002，
+                <strong>而准确率是 0%</strong>。
+              </p>
+              <div class="callout callout-warn" style="margin: 12px 0">
+                梯度检验<strong>抓不到</strong>这类错误（数学是自洽的，只是瞄错了目标），
+                必须靠"训练完准确率是多少"这种端到端判据兜底。
+                所以本页对拍脚本里专门有一项：异或训练完准确率必须 ≥ 95%。
+                <strong>凡是用梯度做优化，都要有一个独立的、能反映最终目标的验收指标。</strong>
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="quiz">
+              <details class="quiz">
+                <summary>1. 我给网络加到了 4 层，为什么异或还是学不会？</summary>
+                <div class="quiz-body">
+                  先看激活函数是不是「线性（无激活）」。如果是，那这几层在数学上
+                  等价于<strong>一个线性变换</strong>：
+                  <span class="math" data-tex="a^{(2)} = a^{(0)}W^{(1)}W^{(2)}"></span>，
+                  再深的复合也只是把若干个矩阵乘在一起，还是一个矩阵。
+                  而异或<strong>线性不可分</strong>——任何一条直线都分不开它。
+                  <br/><br/>
+                  换个非线性的激活函数（哪怕只有 2 个隐层神经元），异或立刻就能解：
+                  实测 ReLU 只要 <strong>4~6 轮</strong>就到 100% 准确率。
+                  <strong>深度不是表达力的来源，非线性才是。</strong>
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>2. 页面把激活切到"线性"时，准确率有时显示 75%，不是才 50% 吗？</summary>
+                <div class="quiz-body">
+                  这个 75% 是<strong>假象，千万别信</strong>。当时我差点把它写上页面，
+                  一查才发现：模型的损失恒为 <span class="math" data-tex="\ln 2 = 0.6931"></span>
+                  （这正好是"完全无信息"的值），
+                  概率跨度只有 <span class="math" data-tex="0.4978 \sim 0.5073"></span>
+                  ——基本上是个常数 0.5。
+                  <br/><br/>
+                  那 75% 怎么来的？因为网络碰巧把多数点分给了同一个类
+                  （预测分布 40 : 120），而这些点的真实标签恰好多数是那一类。
+                  <strong>这是统计学上的巧合，不是学习。</strong>
+                  <br/><br/>
+                  教训很实用：<strong>当类别不平衡、或者模型退化时，准确率会骗人。</strong>
+                  判断"有没有学到东西"要看损失和概率分布，别只看准确率。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>3. 隐层神经元越多越好吗？从「螺旋」和「同心圆」上看。</summary>
+                <div class="quiz-body">
+                  不是"越多越好"，是<strong>"够用才行"</strong>，而且有实际代价。实测：
+                  <ul style="margin: 6px 0; padding-left: 1.2em">
+                    <li>同心圆：4 个神经元 → 71.3%（学不会闭合边界）；
+                      8 个 → 100%；双层 8+8 → 100% 但收敛快一倍。</li>
+                    <li>螺旋：2 个 → 92.8%；8 个 → 97.8%；双层 16+16 → 97.8%
+                      但<strong>达标用的轮数从 28 降到 8</strong>。</li>
+                  </ul>
+                  上面的共同规律：<strong>宽度/深度不够是"学不动"，够了之后继续加不涨准确率，
+                  只加快收敛</strong>。而参数越多越容易过拟合、越慢——
+                  所以一般是"先加够，再加正则"。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>4. 学习率调大到 3.0 也没崩，那"学习率太大会发散"是骗人的？</summary>
+                <div class="quiz-body">
+                  不是骗人，是<strong>取决于数据尺度和损失形状</strong>。
+                  这一页的数据已经归一化到 [-1, 1] 附近，梯度本身很小，
+                  所以 lr 大一点也没事（实测 lr=3.0 依然收敛到 99.2%）。
+                  <br/><br/>
+                  但 lr=0.01 时，300 轮才到 87.1%，损失几乎卡在 0.295 不动
+                  ——<strong>太小的问题是"走得慢，看着像不收敛"</strong>。
+                  真实数据如果不做缩放，特征量级差得远，那 lr 稍大就真的会炸。
+                  <br/><br/>
+                  所以学习率没有"通用好值"，它和<strong>数据尺度、批量大小、优化器</strong>
+                  都耦合。这也是为什么实践中要配合学习率调度或自适应优化器。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>5. 反向传播和"对每个参数单独求导"，结果不一样吗？</summary>
+                <div class="quiz-body">
+                  <strong>结果完全一样，区别只在算得多快。</strong>
+                  单独求导（数值梯度）是每个参数扰动两次、重算一遍损失，
+                  复杂度随参数量线性增长；有 <span class="math" data-tex="P"></span> 个参数
+                  就要前向 <span class="math" data-tex="2P"></span> 次。
+                  <br/><br/>
+                  反向传播复用中间结果，<strong>一次前向 + 一次反向</strong>
+                  就能拿到全部参数的梯度。参数量上百万时，这是"能算"和"算不动"的区别。
+                  <br/><br/>
+                  也正因为它俩结果一样，我们才能<strong>用数值梯度去检验反向传播写对没有</strong>
+                  ——这一页的对拍脚本就是这么做的：解析梯度和数值梯度的相对误差在
+                  <span class="math" data-tex="10^{-8}"></span> 量级（最差一个有
+                  <span class="math" data-tex="4.5\times10^{-6}"></span>，
+                  那是 sigmoid 饱和区把有效精度吃掉了）。
+                </div>
+              </details>
+              <details class="quiz">
+                <summary>6. 为什么对拍时"两边各训一个网络然后比结果"是错的？</summary>
+                <div class="quiz-body">
+                  因为<strong>权重是随机的</strong>，我的随机数发生器和 numpy 的不可能同步。
+                  两个网络从不同的起点出发，走同一条路也会停在不同的地方，
+                  比出来的差异说明不了实现对不对。
+                  <br/><br/>
+                  正确的对拍方式是<strong>"把同一份权重喂给两边，只比前向"</strong>：
+                  我用 <span class="math" data-tex="\text{Xavier}"></span> 初始化一组权重，
+                  直接写进 sklearn 的 <span class="math" data-tex="\text{coefs\_}"></span>
+                  和 <span class="math" data-tex="\text{intercepts\_}"></span>，
+                  两边跑前向、比输出概率——这样随机性就被完全绕开了。
+                  <br/><br/>
+                  这是<strong>对拍随机性算法的一个通用套路</strong>：
+                  把随机产物喂给两边，只比确定性的那一段。
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <aside>
+          <div class="panel">
+            <div class="panel-title">网络设置</div>
+
+            <div class="field">
+              <label for="sel-data">数据集</label>
+              <select id="sel-data" class="select"></select>
+            </div>
+
+            <div class="field" style="margin-top: 12px">
+              <label for="sel-act">激活函数</label>
+              <select id="sel-act" class="select"></select>
+            </div>
+
+            <div class="stack" id="controls" style="margin-top: 12px"></div>
+
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px">
+              <button class="btn btn-primary" id="btn-train">重新训练</button>
+              <button class="btn" id="btn-more">多训 200 轮</button>
+              <button class="btn" id="btn-reset">重置</button>
+            </div>
+
+            <div class="callout callout-tip" id="data-desc" style="margin-top: 14px"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">使用说明</div>
+            <ol style="font-size: 13px; color: var(--text-2); margin: 0; padding-left: 1.2em">
+              <li>先看「异或」+ ReLU：边界是三段折线，说明它靠"掰弯"分开了四个角。</li>
+              <li>把激活切成「线性（无激活）」：边界立刻变成一条直线，怎么训都学不会。</li>
+              <li>切到「螺旋」，把每个隐层神经元数从 2 拉到 16，看边界从糊成一片变清晰。</li>
+              <li>隐层设成「8,8」（两层），激活选 logistic，感受深层 + 饱和激活有多难训。</li>
+              <li>盯「首层梯度 / 末层梯度」这个比值：logistic 会掉到 1e-6 量级。</li>
+            </ol>
+          </div>
+        </aside>
+      </div>
+
+      <div class="pager" id="pager"></div>
+    </div>
+
+    <footer class="footer">
+      <p>
+        可视化 ECharts · 公式 KaTeX · MLP 手写实现（前向 + 反向传播 + mini-batch SGD，无深度学习框架），
+        前向概率已与 scikit-learn MLPClassifier 权重互传对拍，解析梯度已与数值梯度对拍 ·
+        鸢尾花数据来自 sklearn.datasets
+      </p>
+    </footer>
+
+    <script type="module" src="../../src/pages/neuralNetwork.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,716 @@
+/* ==================================================================
+ * 首页布局：实验台（Lab console）
+ *
+ * 为什么要单独一个文件：
+ *   原来的首页是「居中标题 + 一行徽章 + 若干个一模一样的卡片网格」，
+ *   每一屏都在重复同一个节奏，信息密度也低。这次重排的核心是
+ *   **给每个区块一个明确的角色**，让人一眼能看出层级：
+ *
+ *     hero     → 左：定位说明 + 硬数字；右：参数↔代码 的取样面板
+ *     section  → mono 编号 + 标题 + 描述 + 一道渐隐分隔线
+ *     card     → 编号 / 算法名 / sklearn 入口 都有位置
+ *     pipeline → 学习路线画成一条有方向的流，而不是一排胶囊
+ *     feature  → 编号条目 + 左侧竖条，扫读时不用逐字看
+ *
+ * 配色只取 tokens.css 里的变量，不写死颜色，保证明暗两套主题都成立。
+ * 动效只碰 transform / opacity，且都尊重 prefers-reduced-motion。
+ * ================================================================== */
+
+/* 等宽字体栈：编号、算法名、代码标签统一用它，建立"工程感"的视觉语言 */
+:root {
+  --font-mono-ui: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* ------------------------------------------------------------------
+ * 一、Hero
+ * ------------------------------------------------------------------ */
+.hero {
+  /*
+   * ⚠️ 这里只能用 padding-top / padding-bottom，**不能写 padding 简写**。
+   * `.hero` 同时挂了 `.container`，而 container 的左右内边距是靠
+   * `padding: 0 var(--sp-5)` 给的；简写会把左右两边的值一起覆盖成 0，
+   * hero 里的文字就会顶到视口边缘（实测 computed padding 变成 "48px 0 32px"），
+   * 和页面其它区块对不齐。
+   */
+  padding-top: var(--sp-8);
+  padding-bottom: var(--sp-7);
+  /* 覆盖 layout.css 里的居中排版：改成左对齐的左右分栏 */
+  text-align: left;
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: var(--sp-7);
+  align-items: center;
+}
+
+/* --- 眉标：一根短竖线 + 全大写 mono 标签，替代原来空荡荡的顶部 --- */
+.hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono-ui);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.16em;
+  color: var(--text-3);
+  margin: 0;
+}
+
+.eyebrow-bar {
+  width: 26px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--danger));
+  flex: none;
+}
+
+.hero h1 {
+  font-size: 46px;
+  line-height: 1.14;
+  letter-spacing: -0.02em;
+  margin: var(--sp-4) 0 0;
+}
+
+/*
+ * 用「下划一道渐变线」强调关键词，而不是放大字号。
+ * 实现用 background-image 贴在文字底部，**不用伪元素 + z-index: -1** ——
+ * 那种写法依赖父级没有形成层叠上下文，换个祖先元素就可能整块消失。
+ * background 跟着文字的盒模型走，任何上下文里都稳定。
+ */
+.hero h1 b {
+  font-weight: inherit;
+  color: var(--danger);
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--danger) 36%, transparent),
+    color-mix(in srgb, var(--danger) 6%, transparent)
+  );
+  background-repeat: no-repeat;
+  background-size: 100% 0.3em;
+  background-position: 0 92%;
+}
+
+.hero-sub {
+  margin: var(--sp-5) 0 0;
+  max-width: 46ch;
+  color: var(--text-2);
+  font-size: var(--fs-lg);
+  line-height: 1.75;
+}
+
+/* --- 硬数字：用 dl 承载，语义上就是"术语-数值"对 --- */
+.hero-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-5) var(--sp-6);
+  margin: var(--sp-6) 0 0;
+  padding: var(--sp-5) 0 0;
+  border-top: 1px solid var(--border);
+}
+
+.hero-stats .stat {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.hero-stats dt {
+  font-family: var(--font-mono-ui);
+  font-size: 27px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text);
+  /* 数字用等宽 + 表格数字，避免不同值之间宽度跳动 */
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-stats dd {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+/*
+ * hero 的入口按钮。
+ *
+ * 之前 hero 结尾是一行徽章（全部已上线 / 参数↔代码 / 深浅色 / 响应式），
+ * 那四条的信息在别处都有（统计数字里、07 区块里），读完 hero 反而没有
+ * 「从哪开始」的出口。现在换成唯一一个入口。
+ */
+.hero-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--sp-5);
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  transition: transform var(--t-fast), filter var(--t-fast);
+}
+
+.hero-cta:hover {
+  text-decoration: none;
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+}
+
+.hero-cta-arrow {
+  transition: transform var(--t-fast);
+}
+
+.hero-cta:hover .hero-cta-arrow {
+  transform: translateX(3px);
+}
+
+/* --- 右侧取样面板：把"参数 ↔ 代码"这个卖点直接做出来 --- */
+.hero-console {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
+  backdrop-filter: blur(6px);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+
+/* 顶部一条极细的渐变高光，暗示"这层浮在背景之上" */
+.hero-console::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--danger) 60%, transparent), transparent);
+}
+
+.console-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-code);
+}
+
+.console-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  flex: none;
+}
+
+.console-file {
+  margin-left: auto;
+  font-family: var(--font-mono-ui);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.console-code {
+  margin: 0;
+  padding: var(--sp-4);
+  font-family: var(--font-mono-ui);
+  font-size: 12.5px;
+  line-height: 1.85;
+  color: var(--text-2);
+  background: var(--bg-code);
+  overflow-x: auto;
+}
+
+.console-code .kw {
+  color: var(--primary);
+}
+.console-code .str {
+  color: var(--accent);
+}
+.console-code .num {
+  color: var(--danger);
+}
+
+.console-meta {
+  padding: var(--sp-4);
+}
+
+.metric-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.metric-line b {
+  font-family: var(--font-mono-ui);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 迷你损失曲线：加载时描一遍，之后静止（一次性动画，不常驻耗电） */
+.spark {
+  display: block;
+  width: 100%;
+  height: 56px;
+  margin: 10px 0;
+  overflow: visible;
+}
+
+.spark path {
+  fill: none;
+  stroke: var(--danger);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.9;
+}
+
+.spark .spark-area {
+  fill: url(#sparkGrad);
+  stroke: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .spark path:not(.spark-area) {
+    stroke-dasharray: 400;
+    stroke-dashoffset: 400;
+    animation: spark-draw 1.5s cubic-bezier(0.22, 0.8, 0.3, 1) 0.2s forwards;
+  }
+  @keyframes spark-draw {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+}
+
+/* ------------------------------------------------------------------
+ * 二、分区标题
+ *
+ * 结构： [编号] [标题 + 描述] ————渐隐线————
+ * 编号是 mono 的两位数字，制造"章节感"，也让长页面有节奏。
+ * ------------------------------------------------------------------ */
+.sec-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(40px, 1fr);
+  align-items: end;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-5);
+}
+
+.sec-no {
+  font-family: var(--font-mono-ui);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--danger);
+  /* 上移到标题基线上方，像一个侧标 */
+  align-self: start;
+  padding-top: 7px;
+}
+
+.sec-title h2 {
+  font-size: var(--fs-2xl);
+  line-height: 1.25;
+}
+
+.sec-title p {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  margin-top: 6px;
+}
+
+.sec-rule {
+  height: 1px;
+  margin-bottom: 9px;
+  /*
+   * 起点带一点红：纯用 --border 在暗红底上几乎看不见，等于白画。
+   * 用主题色起头，既有对比、也和背景层的绯红呼应。
+   */
+  background: linear-gradient(90deg, color-mix(in srgb, var(--danger) 55%, transparent), transparent);
+}
+
+/* ------------------------------------------------------------------
+ * 三、演示卡片
+ *
+ * 比原来多了两处信息：右上角的编号、底部的 sklearn 入口。
+ * 顶部一条 accent 线只在 hover 时点亮，平时保持安静。
+ * ------------------------------------------------------------------ */
+.demo-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.demo-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--danger), var(--primary));
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.28s ease;
+}
+
+.demo-card:hover::before {
+  transform: scaleX(1);
+}
+
+.demo-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.demo-card-no {
+  font-family: var(--font-mono-ui);
+  font-size: 11px;
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+  padding-top: 3px;
+}
+
+.demo-card h3 {
+  font-size: var(--fs-lg);
+  margin-top: var(--sp-3);
+}
+
+/* API 标签：等宽 + 淡底，一眼区分于正文描述 */
+.demo-card-api {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 5px;
+  margin-top: 2px;
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  border: 1px dashed var(--border-strong);
+  background: var(--bg-code);
+  font-family: var(--font-mono-ui);
+  font-size: 11.5px;
+  color: var(--text-2);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.demo-card-api::before {
+  content: ">>>";
+  color: var(--text-3);
+  font-size: 10px;
+  flex: none;
+}
+
+/* 卡片内的描述与底部之间撑开 */
+.demo-card p {
+  flex: 1;
+}
+
+/* 底部徽章行：保持一致的间距，学过时两个徽章并排 */
+.demo-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+/* ------------------------------------------------------------------
+ * 四、学习路线 = 一条流
+ *
+ * 横向可滚动，而不是折行 —— 折行会把"这是一条有方向的路线"这个信息毁掉。
+ * 连接线用容器上的伪元素画，节点盖在上面，所以在滚动时线会跟着走。
+ * ------------------------------------------------------------------ */
+.pipeline-wrap {
+  position: relative;
+}
+
+.pipeline {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  padding: var(--sp-5) 2px;
+  /* 滚动条做细一点，别抢视线 */
+  scrollbar-width: thin;
+}
+
+.pipeline::-webkit-scrollbar {
+  height: 6px;
+}
+
+.pipeline::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+/* 背后的横向导线：从第一个节点中心贯穿到最后一个 */
+.pipeline::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-strong) 6%, var(--border-strong) 94%, transparent);
+  pointer-events: none;
+}
+
+/*
+ * 节点之间的小箭头
+ *
+ * 两个都设 `align-items: stretch`：遇到「Logistic 回归」这种要换两行的名字时，
+ * 所有节点会一起长到同样的高度，整排是齐的；用 center 的话只有那一格变高，
+ * 看上去像没对齐。
+ */
+.pipe-item {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 0;
+  min-width: 92px;
+}
+
+.pipe-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-elev);
+  color: var(--text);
+  transition: transform var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast);
+}
+
+.pipe-node:hover {
+  transform: translateY(-2px);
+  border-color: var(--danger);
+  box-shadow: var(--shadow-2);
+  text-decoration: none;
+}
+
+.pipe-no {
+  font-family: var(--font-mono-ui);
+  font-size: 10.5px;
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+}
+
+.pipe-name {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.pipe-node.is-done {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-weak);
+}
+
+.pipe-node.is-done .pipe-name {
+  color: var(--accent);
+}
+
+.pipe-node.is-current {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-elev));
+}
+
+.pipe-node.is-current .pipe-name {
+  color: var(--danger);
+}
+
+/* 节点之间的小箭头 */
+.pipe-arrow {
+  flex: none;
+  width: 20px;
+  height: 1px;
+  position: relative;
+  margin: 0 -1px;
+}
+
+.pipe-arrow::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: -2.5px;
+  width: 5px;
+  height: 5px;
+  border-top: 1px solid var(--border-strong);
+  border-right: 1px solid var(--border-strong);
+  transform: rotate(45deg);
+}
+
+.pipe-done-tick {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--accent-weak);
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* ------------------------------------------------------------------
+ * 五、差异化区块
+ *
+ * 这一块原来的问题是「标题承诺比较，内容只是罗列」：
+ *   ① 区块编号是 07，里面的条目又编号 01–07 —— 同一个视觉语言在两个层级上
+ *      表示不同的东西，读者要猜「07 和 07 是什么关系」；
+ *   ② 7 条等权，把「参数即代码」这种真差异，和「深浅色」「响应式」这种
+ *      任何现代站点都有的表配混在一起，重点被稀释。
+ *
+ * 现在改成两级：3 条核心差异（大卡、各带一句可验证的事实）+ 1 行「另外还有」。
+ * 信息一条没少，但有了权重，也不再和区块编号撞车。
+ * ------------------------------------------------------------------ */
+.diff-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--sp-4);
+}
+
+.diff-card {
+  position: relative;
+  padding: var(--sp-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-1);
+}
+
+/* 左侧一道 accent 竖条，hover 时点亮 */
+.diff-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--sp-5);
+  bottom: var(--sp-5);
+  width: 2px;
+  border-radius: 1px;
+  background: var(--danger);
+  opacity: 0.25;
+  transition: opacity var(--t-fast);
+}
+
+.diff-card:hover::before {
+  opacity: 1;
+}
+
+.diff-card h3 {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.diff-card p {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  line-height: 1.75;
+}
+
+/* 证据里的行内代码：等宽 + 淡底，一眼区分于叙述 */
+.diff-card code {
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono-ui);
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.diff-more {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+/* ------------------------------------------------------------------
+ * 六、响应式
+ * ------------------------------------------------------------------ */
+@media (max-width: 1024px) {
+  .hero-grid {
+    grid-template-columns: 1fr;
+    gap: var(--sp-6);
+  }
+  .hero h1 {
+    font-size: 38px;
+  }
+  .hero-console {
+    max-width: 520px;
+  }
+  .sec-head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  /* 窄屏上分隔线没地方放，直接收掉 */
+  .sec-rule {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .hero {
+    /* 同样只用上下两个方向，别把 container 的左右内边距冲掉 */
+    padding-top: var(--sp-7);
+    padding-bottom: var(--sp-6);
+  }
+  .hero h1 {
+    font-size: 31px;
+  }
+  .hero-sub {
+    font-size: var(--fs-md);
+  }
+  .hero-stats {
+    gap: var(--sp-4) var(--sp-5);
+  }
+  .hero-stats dt {
+    font-size: 22px;
+  }
+  .diff-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero h1 {
+    font-size: 27px;
+  }
+  .hero-stats {
+    /* 两列排布，避免四个数字挤成一行折得很难看 */
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-4);
+  }
+  .hero-stats .stat {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+}
+
+/* 打印/导出时不需要这些装饰性的分隔线 */
+@media print {
+  .sec-rule,
+  .pipe-arrow::after,
+  .demo-card::before {
+    display: none;
+  }
+}
