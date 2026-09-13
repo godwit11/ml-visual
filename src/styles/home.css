@@ -566,85 +566,9 @@
   line-height: 1;
 }
 
-/* ------------------------------------------------------------------
- * 五、差异化区块
- *
- * 这一块原来的问题是「标题承诺比较，内容只是罗列」：
- *   ① 区块编号是 07，里面的条目又编号 01–07 —— 同一个视觉语言在两个层级上
- *      表示不同的东西，读者要猜「07 和 07 是什么关系」；
- *   ② 7 条等权，把「参数即代码」这种真差异，和「深浅色」「响应式」这种
- *      任何现代站点都有的表配混在一起，重点被稀释。
- *
- * 现在改成两级：3 条核心差异（大卡、各带一句可验证的事实）+ 1 行「另外还有」。
- * 信息一条没少，但有了权重，也不再和区块编号撞车。
- * ------------------------------------------------------------------ */
-.diff-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: var(--sp-4);
-}
-
-.diff-card {
-  position: relative;
-  padding: var(--sp-5);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--bg-elev);
-  box-shadow: var(--shadow-1);
-}
-
-/* 左侧一道 accent 竖条，hover 时点亮 */
-.diff-card::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: var(--sp-5);
-  bottom: var(--sp-5);
-  width: 2px;
-  border-radius: 1px;
-  background: var(--danger);
-  opacity: 0.25;
-  transition: opacity var(--t-fast);
-}
-
-.diff-card:hover::before {
-  opacity: 1;
-}
-
-.diff-card h3 {
-  font-size: var(--fs-md);
-  font-weight: 600;
-}
-
-.diff-card p {
-  margin-top: var(--sp-3);
-  font-size: var(--fs-sm);
-  color: var(--text-2);
-  line-height: 1.75;
-}
-
-/* 证据里的行内代码：等宽 + 淡底，一眼区分于叙述 */
-.diff-card code {
-  padding: 1px 5px;
-  border-radius: var(--r-sm);
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  font-family: var(--font-mono-ui);
-  font-size: 12px;
-  color: var(--text);
-  white-space: nowrap;
-}
-
-.diff-more {
-  margin-top: var(--sp-4);
-  padding-top: var(--sp-4);
-  border-top: 1px solid var(--border);
-  font-size: var(--fs-sm);
-  color: var(--text-3);
-}
 
 /* ------------------------------------------------------------------
- * 六、响应式
+ * 五、响应式
  * ------------------------------------------------------------------ */
 @media (max-width: 1024px) {
   .hero-grid {
@@ -683,9 +607,6 @@
   }
   .hero-stats dt {
     font-size: 22px;
-  }
-  .diff-grid {
-    grid-template-columns: 1fr;
   }
 }
 

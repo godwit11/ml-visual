@@ -1,4 +1,4 @@
 {
   "_note": "首页会展示的站点事实数字。pageAssertions 由 `npm run verify:all` 校验：它会把实际跑出来的页面断言数加起来，对不上就直接判失败。所以改了断言数量必须同步改这里，否则回归会红 —— 这样首页上的数字不会悄悄变成假话。",
-  "pageAssertions": 328
+  "pageAssertions": 327
 }

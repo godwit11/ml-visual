@@ -61,21 +61,25 @@ check('hero 取样面板里有损失曲线路径', Boolean(q('.hero-console .spa
 const secHeads = qa('.sec-head')
 check('分区标题都带编号与分隔线', secHeads.length > 0 && secHeads.every((h) => h.querySelector('.sec-no')), secHeads.length)
 
-/* ---------- 4. 差异区块：3 条核心 + 1 行补充 ---------- */
-const diffCards = qa('.diff-card')
-check('差异化区块是 3 条核心差异', diffCards.length === 3, diffCards.length)
-check(
-  '每条差异都有标题和证据正文',
-  diffCards.every((c) => c.querySelector('h3') && (c.querySelector('p')?.textContent.trim().length || 0) > 0),
-)
-check('差异卡片里有行内代码作为证据', qa('.diff-card code').length >= 2, qa('.diff-card code').length)
-check('剩下的 4 条收成了一行小字', qa('.diff-more').length === 1)
-
-/*
- * 编号冲突：区块编号是 07，条目原来又编 01–07。
- * 现在差异区块内部不该再出现条目编号，否则同一个视觉语言又会在两个层级上打架。
+/* ---------- 4. 导航锚点必须真的有落点 ----------
+ * 教训：导航栏曾经挂着 `#demos` 和 `#features` 两个链接，但 `#demos` 这个元素
+ * **页面上根本不存在** —— 点了完全没反应，而且不报错、不影响渲染，
+ * 靠肉眼和截图都发现不了。演示页导航里的「全部演示」也指向 `/#demos`，一并受影响。
+ * 所以这里逐个锚点验证目标存在。
  */
-check('差异区块内部不再有条目编号', qa('.diff-card .feature-no, .diff-card .diff-no').length === 0)
+const navAnchors = qa('.nav-links a')
+check('导航链接不为空', navAnchors.length > 0, navAnchors.length)
+check(
+  '每个导航锚点都有对应的元素落点',
+  navAnchors.every((a) => {
+    const href = a.getAttribute('href') || ''
+    if (!href.startsWith('#')) return true
+    return Boolean(document.getElementById(href.slice(1)))
+  }),
+  navAnchors.map((a) => a.getAttribute('href')),
+)
+check('「演示」锚点 #demos 存在', Boolean(document.getElementById('demos')))
+check('已移除的区块没有残留锚点引用', !document.getElementById('features'))
 
 const pipeNodes = qa('.pipe-node')
 check('学习路线是 10 步的流水线', pipeNodes.length === 10, pipeNodes.length)

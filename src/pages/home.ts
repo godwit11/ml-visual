@@ -239,11 +239,18 @@ pathSection.append(buildSecHead(pad2(secNo++), '建议学习路线', '按知识�
 pathSection.append(buildPipeline())
 
 const sections: HTMLElement[] = [pathSection]
+/* 导航栏「演示」的锚点要落在第一个模块区块上（此前 #demos 根本不存在，点了没反应） */
+let demosAnchorAssigned = false
+
 for (const m of MODULES) {
   const list = DEMOS.filter((d) => d.module === m.id)
   if (list.length === 0) continue
   const sec = document.createElement('section')
   sec.className = 'section'
+  if (!demosAnchorAssigned) {
+    sec.id = 'demos'
+    demosAnchorAssigned = true
+  }
   sec.append(buildSecHead(pad2(secNo++), m.name, m.desc))
   const grid = document.createElement('div')
   grid.className = 'grid'
@@ -253,81 +260,6 @@ for (const m of MODULES) {
 }
 
 root.append(...sections)
-
-/* ------------------------------------------------------------------ *
- * 差异化说明
- *
- * 这一块原来有 7 条等权条目，其中 5 条 hero 上已经说过（深浅色、响应式、
- * 参数即代码、算法手写、数字有出处都重复出现），而区块编号 07 又和条目的
- * 01–07 撞车。现在只留 3 条真正区别于同类教学站的，各配一句**可验证的事实**，
- * 其余 4 条收成一行小字 —— 信息没丢，但有了权重，也不再和编号冲突。
- * ------------------------------------------------------------------ */
-
-const featuresEl = document.getElementById('features')
-if (featuresEl) {
-  featuresEl.append(
-    buildSecHead(pad2(secNo++), '和别的演示站有什么不一样', '参考过同类的教学站之后，我们补上了这几块'),
-  )
-
-  /** 证据里可以夹行内代码，用 { code } 标出来 */
-  type Seg = string | { code: string }
-
-  const diffs: { title: string; body: Seg[] }[] = [
-    {
-      title: '参数即代码',
-      body: [
-        '滑杆旁边跟着等价的 sklearn 写法，玩完直接带走。每张演示卡片都标着对应入口，例如 ',
-        { code: 'LinearRegression' },
-        '。',
-      ],
-    },
-    {
-      title: '算法全部手写',
-      body: [
-        '10 个算法模块零第三方数学库，前端的运行时依赖只有 ECharts 和 KaTeX —— ',
-        '前者画图、后者排版公式，没有一个在替我们算模型。',
-      ],
-    },
-    {
-      title: '每个数字都能复跑',
-      body: [
-        '页面上每个数字都来自一次真实运行。',
-        { code: 'npm run verify:all' },
-        ' 一条命令把 ',
-        { code: `${PAGE_ASSERTIONS} 项页面断言` },
-        ' 和十套 sklearn 对拍全部重跑一遍。',
-      ],
-    },
-  ]
-
-  const grid = document.createElement('div')
-  grid.className = 'diff-grid'
-  for (const d of diffs) {
-    const card = document.createElement('div')
-    card.className = 'diff-card'
-    const h = document.createElement('h3')
-    h.textContent = d.title
-    const p = document.createElement('p')
-    for (const seg of d.body) {
-      if (typeof seg === 'string') {
-        p.append(document.createTextNode(seg))
-      } else {
-        const c = document.createElement('code')
-        c.textContent = seg.code
-        p.append(c)
-      }
-    }
-    card.append(h, p)
-    grid.append(card)
-  }
-
-  // 原来那 7 条里剩下的 4 条：不是差异点，但也不该丢，收成一行
-  const more = document.createElement('p')
-  more.className = 'diff-more'
-  more.textContent = '另外还有：学习路径 · 每页思考题 · 深浅色 · 完整响应式'
-
-  featuresEl.append(grid, more)
-}
 
 /* 首页也算访问过，避免路径条全灰 */
 if (demoById('linear-regression')?.status === 'live' && visited.size === 0) {

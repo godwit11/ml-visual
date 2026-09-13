@@ -276,7 +276,71 @@ node scripts/e2e.mjs --serve --url <url> --script <脚本> --shot <路径> [--vi
 
 ---
 
-## 7. 最短上手路径
+## 7. 部署（GitHub → Vercel → 自有域名）
+
+**线上地址：<https://www.godwit.asia/>**（2026-09-12 上线）
+
+### 链路
+
+```
+本机源码 → git push → GitHub godwit11/ml-visual (main) → Vercel 自动构建 → 全球 CDN
+                                                                    ↑
+                                          www.godwit.asia 的 DNS 已指向 Vercel
+```
+
+### 日常更新：只需 push
+
+```bash
+git add -A && git commit -m "..." && git push
+```
+
+推送到 `main` 会**自动触发生产部署**，约 1–2 分钟。推送到其它分支会得到**预览部署**
+（独立链接，不影响线上）。
+
+### 关键配置
+
+| 项 | 值 | 位置 |
+|---|---|---|
+| Vercel 项目 | `ml-visual`，team `godwit-3-3310's` (Hobby) | Vercel Dashboard |
+| 构建命令 | `node scripts/gen-sitemap.mjs && npm run build` | `vercel.json`（**不要**在网页上覆盖） |
+| 输出目录 | `dist` | `vercel.json` |
+| 主域名 | `www.godwit.asia` | Vercel → Settings → Domains |
+| apex `godwit.asia` | 308 → `www.godwit.asia` | 同上 |
+| DNS | 阿里云，`www` 是 CNAME → `vercel-dns-017.com` | **不需要动** |
+| 证书 | Let's Encrypt，Vercel 自动续期 | 无需操作 |
+
+### ⚠️ 坑：`*.vercel.app` 在国内被 DNS 污染
+
+Vercel 免费送的 `ml-visual-opin.vercel.app` 之类地址，**在国内解析不到真 IP**
+（实测本地 DNS 和阿里 223.5.5.5 都返回 Facebook 的 IP 段）。
+
+后果：
+- **不能用它来验收**，也不能把它分享给国内的人。**对外一律用 `www.godwit.asia`。**
+- 想确认部署是否成功，看 Dashboard 的 `Ready` 状态和缩略图。
+
+### 验证线上是否正常
+
+```bash
+# 站点在线 & 内容对不对
+curl -s https://www.godwit.asia/ | grep -oE "<title>[^<]*</title>"
+
+# 在真实域名上跑链接可达性检查（会真开浏览器、真请求每条链接）
+node scripts/e2e.mjs --url https://www.godwit.asia/ --script scripts/tests/links.js
+node scripts/e2e.mjs --url https://www.godwit.asia/demos/pca/ --script scripts/tests/links.js
+```
+
+> 用 `--url <线上地址>` 且**不加 `--serve`**，就会直接打线上，而不是起本地预览。
+
+### 已知限制
+
+- Vercel 节点在海外（实测 `x-vercel-id: hnd1` = 东京），**中国大陆访问速度不稳定**。
+  指向海外服务器的域名**不需要 ICP 备案**。
+  若日后要国内稳定快速访问，需要：备案 + 换国内托管（阿里云 OSS / 轻量服务器 / EdgeOne 等）。
+  这是个独立决定，当前未做。
+
+---
+
+## 8. 最短上手路径
 
 ```bash
 cd /d/奇迹学习/ml-visual
