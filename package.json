@@ -44,7 +44,10 @@
     "verify:bg:motion": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/ --script scripts/tests/probe-bgperf.js --reduced-motion",
     "verify:bg:dpr": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/ --script scripts/tests/probe-bgperf.js --dpr 3",
     "verify:bg:mobile": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/ --script scripts/tests/probe-mobile.js --size 420,900",
-    "shot:home": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/ --script scripts/tests/shot-home-dark.js --shot .shots/home-dark.png --viewport"
+    "shot:home": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/ --script scripts/tests/shot-home-dark.js --shot .shots/home-dark.png --viewport",
+    "check:heads": "node scripts/check-heads.mjs",
+    "e2e:quality": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/linear-regression/ --script scripts/tests/probe-quality.js",
+    "e2e:quality:mobile": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/linear-regression/ --script scripts/tests/probe-quality.js --size 420,900"
   },
   "dependencies": {
     "echarts": "^5.5.1",

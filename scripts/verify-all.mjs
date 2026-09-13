@@ -87,6 +87,24 @@ const CROSSCHECK = [
   ['十套对拍 · 神经网络', 'crosscheck:nn'],
 ]
 
+/*
+ * 附加检查：不参与「首页断言数」的统计。
+ *
+ * 为什么不并入 E2E 列表：末尾那个交叉校验会把 E2E 步骤的断言数加起来，
+ * 和 `src/data/siteStats.json` 里首页展示的数字比对。这些探针是**独立**的
+ * 自查工具（每个 8 项），并入会把总数算错。
+ *
+ * 它们各自都抓到过真 bug：
+ *   · check:heads     —— clustering 页少 9 个 head 标签（canonical/favicon/og:）
+ *   · e2e:quality     —— 桌面端资源加载、横向溢出、渲染空白
+ *   · e2e:quality:mobile —— 所有演示页在 466px 视口下横向溢出 49px
+ */
+const EXTRA = [
+  ['head 标签一致性', 'check:heads'],
+  ['页面质检 · 桌面', 'e2e:quality'],
+  ['页面质检 · 移动', 'e2e:quality:mobile'],
+]
+
 /* ---------------- 参数 ---------------- */
 
 const argv = process.argv.slice(2)
@@ -96,6 +114,7 @@ const only = onlyArg ? onlyArg.split('=')[1] : null
 
 let steps = []
 if (!only || only === 'unit') steps.push(...UNIT)
+if (!only || only === 'extra') steps.push(...EXTRA)
 if (!only || only === 'e2e') steps.push(...E2E)
 if ((!only || only === 'crosscheck') && !fast) steps.push(...CROSSCHECK)
 

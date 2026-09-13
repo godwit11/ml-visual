@@ -161,7 +161,20 @@
 
 @media (max-width: 1024px) {
   .demo-layout {
-    grid-template-columns: 1fr;
+    /*
+     * ⚠️ 必须是 `minmax(0, 1fr)`，不能写裸 `1fr`。
+     *
+     * `1fr` 等价于 `minmax(auto, 1fr)` —— 那个 `auto` 下限意味着轨道
+     * **不能收缩到内容的内在（min-content）宽度以下**。
+     * 而两栏里的图表容器是 `.chart { width: 100% }` 里放一个 ECharts 的
+     * `<canvas width="449">`：算内在宽度时百分比无法解析、会回退成 `auto`，
+     * 于是 canvas 的固有宽度倒推成整个轨道的下限。
+     * 实测结果：466px 视口下轨道被撑到 499px，整页多出 49px 横向滚动条。
+     *
+     * `minmax(0, 1fr)` 把下限改成 0，轨道就能正常收缩。
+     * 桌面端那两列本来就用的是 `minmax(0, 1.55fr)`，只有这里漏了。
+     */
+    grid-template-columns: minmax(0, 1fr);
   }
   .chart {
     height: 340px;
