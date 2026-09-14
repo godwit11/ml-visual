@@ -5,3 +5,7 @@
 @import './layout.css';
 /* 首页重排放在最后：它要覆盖 layout.css 里的 .hero / .section-head 等旧规则 */
 @import './home.css';
+/* Nya 助教面板。放最后是因为它要改 .footer 的内边距（避让浮动按钮），
+   必须排在 layout.css 之后才生效。它的选择器都带 #nya / .nya- 前缀，
+   不会和其他文件撞车。 */
+@import './chat.css';

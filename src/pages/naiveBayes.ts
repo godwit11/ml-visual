@@ -10,7 +10,13 @@
  *   3. 代码 / 原理 / 思考题（统一范式）
  */
 import type { EChartsOption } from 'echarts'
-import { mountChrome, round, markVisited, mountPager } from '../bootstrap'
+import {
+  mountChrome,
+  round,
+  markVisited,
+  mountPager,
+  provideNyaStateFromPage,
+} from '../bootstrap'
 import { createChart, palette } from '../core/chart'
 import { mountSlider, type SliderHandle } from '../core/slider'
 import { renderMath } from '../core/math'
@@ -420,3 +426,13 @@ mountPager('naive-bayes')
 
 /* ---------------- 首屏 ---------------- */
 refresh()
+
+
+/* ---------------- Nya 助教：让她看见这一页 ---------------- */
+/*
+ * 用通用读取器，不手写这一页有哪些数字。
+ * 它读的是「屏幕上已经显示出来的字」——指标卡、滑杆、下拉框 ——
+ * 所以拖完滑杆再问她，报的就是新值（每次调用重新读，不缓存）。
+ * 键名要和 chat/nya.ts 里这一页的 stateKeys 逐字一致，否则会被安静地丢掉。
+ */
+provideNyaStateFromPage()

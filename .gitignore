@@ -27,8 +27,12 @@ npm-debug.log*
 .shots/
 
 # 环境变量（本地覆盖用）
+# ⚠️ 这里挡的是「密钥泄露」这条线 —— 任何 .env 变体都不该进仓库，
+#    只有不带密钥的 .env.example 例外。
+.env
 .env.local
 .env.*.local
+!.env.example
 
 # 移动端壳工程产物（Capacitor 输出：www/ 与 android/ 均为构建结果，不入库）
 ml-visual-app/

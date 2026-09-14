@@ -916,3 +916,174 @@
     grid-column: 2;
   }
 }
+
+/* ------------------------------------------------------------------ *
+ * 入门引导层（B）
+ *
+ * 目的：让「完全没学过机器学习」的人在术语第一次出现的地方，
+ * 就地读到一句人话，而不用切到「原理」页去翻定义。
+ *
+ * 为什么不做成悬浮提示（tooltip）：
+ *   tooltip 要用户「主动悬停」才会出现。零基础的人根本不知道那里有东西可悬，
+ *   等于没写。写死在版面里，扫一眼就撞见，才符合这个人群的阅读方式。
+ * 代价是页面变长，所以文案要短 —— 一句话说清「这是什么」，不展开原理。
+ * ------------------------------------------------------------------ */
+
+/* 场景开场：页面第一屏的入口 */
+.intro {
+  border-left: 2px solid var(--accent);
+  padding-left: var(--sp-4);
+  margin: var(--sp-5) 0 var(--sp-6);
+}
+
+.intro-lead {
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.55;
+  margin-bottom: var(--sp-3);
+}
+
+.intro p {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  line-height: 1.75;
+  margin-top: var(--sp-2);
+}
+
+.intro strong {
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* 动手三步：编号 + 动作，是初学者的第一个任务清单 */
+.intro-steps {
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+}
+
+.intro-step {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: start;
+}
+
+/*
+ * ⚠️ 用 minmax(0, 1fr) 而不是 1fr。
+ * 右列可能装长句，1fr 等价 minmax(auto, 1fr)，会被内容撑破布局
+ * （移动端横向溢出的同类坑，见 layout.css 里的注释）。
+ */
+.intro-step-no {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-xs);
+  color: var(--accent);
+  padding-top: 2px;
+}
+
+.intro-step p {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  line-height: 1.65;
+}
+
+/* 术语表：指标格**下方**的纵排解释
+ *
+ * ⚠️ 不要试图把这些解释塞回指标格里。
+ *   `.metric-grid` 在演示页右栏会自动排成两列、每格约 100px，
+ *   实测塞进去会被挤成竖排并与原 hint 重叠。这里纵排、占满整栏。
+ */
+.terms {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.terms-title {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  margin-bottom: var(--sp-2);
+}
+
+.terms-list {
+  margin: 0;
+}
+
+.terms-list dt {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  margin-top: var(--sp-3);
+}
+
+.terms-list dt:first-child {
+  margin-top: 0;
+}
+
+.terms-list dd {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  line-height: 1.6;
+  margin: 2px 0 0;
+}
+
+.terms-list dd strong {
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* 收尾：把玩过的东西翻译成术语 + 代码 + 用途 */
+.recap {
+  border-left: 2px solid var(--warn);
+  padding-left: var(--sp-4);
+  margin-top: var(--sp-6);
+}
+
+.recap-title {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: var(--sp-3);
+}
+
+.recap-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: baseline;
+  margin-top: var(--sp-2);
+}
+
+.recap-label {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+.recap-val {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  line-height: 1.7;
+}
+
+.recap-val strong {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.recap-val code {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-xs);
+  background: var(--bg-code);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--text);
+}
+
+@media (max-width: 768px) {
+  .recap-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}

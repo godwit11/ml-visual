@@ -1,5 +1,6 @@
 import { initTheme, toggleTheme, currentTheme, onThemeChange } from './theme'
 import { mountBackground } from './background'
+import { mountNya } from './nya'
 
 const SUN =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>'
@@ -17,6 +18,14 @@ export function mountChrome(): void {
   wireThemeToggle()
   wireTabs()
   wireCopy()
+  /*
+   * Nya 助教面板（右下角浮动按钮 + 对话）。
+   * 和背景层同理，这里是全站唯一都会经过的挂载点 —— 收在这里，
+   * 以后加页面不用记得再挂一次。它是幂等的，重复调用无副作用。
+   *
+   * 面板本身不依赖网络：问答失败只影响它自己，页面其余部分照常。
+   */
+  mountNya()
 }
 
 function wireThemeToggle(): void {

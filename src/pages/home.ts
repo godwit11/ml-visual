@@ -12,7 +12,17 @@
  * 所有数字都来自项目里的真实情况（演示数、算法模块数、对拍套数），
  * 不写估算值 —— 首页是门面，宁可少写一个数字也不要写错的。
  */
-import { mountChrome, DEMOS, MODULES, getVisited, learningPath, demoById, siteUrl, type DemoMeta } from '../bootstrap'
+import {
+  mountChrome,
+  DEMOS,
+  MODULES,
+  getVisited,
+  learningPath,
+  demoById,
+  siteUrl,
+  provideNyaStateFromPage,
+  type DemoMeta,
+} from '../bootstrap'
 import siteStats from '../data/siteStats.json'
 
 mountChrome()
@@ -266,3 +276,22 @@ if (demoById('linear-regression')?.status === 'live' && visited.size === 0) {
   const hint = document.querySelector<HTMLElement>('[data-first-hint]')
   if (hint) hint.style.display = 'block'
 }
+
+/* ---------------- Nya 助教：让她知道学生在首页 ---------------- */
+/*
+ * 首页是唯一一个**没有指标卡**的页面（没有滑杆、没有数字），所以通用读取器
+ * 在这里取不到任何东西 —— 但首页有它自己的事实：学生看过了哪几页。
+ * 这里是 `extra` 参数的正当用法：补一个页面上没写出来、但确实存在的量。
+ *
+ * ⚠️ 不报"访问过几页"以外的推断（比如"他大概想学分类"）——
+ *    那是猜，不是读。她该说的是"你已经看过线性回归"，不是"你看起来偏好奇迹"。
+ */
+provideNyaStateFromPage(() => {
+  const seen = getVisited()
+  const live = DEMOS.filter((d) => d.status === 'live')
+  const titles = seen.map((id) => demoById(id)?.title ?? id)
+  return {
+    已看过的页数: `${seen.length} / ${live.length}`,
+    看过的页: titles.length > 0 ? titles.join('、') : '（一页都还没看）',
+  }
+})

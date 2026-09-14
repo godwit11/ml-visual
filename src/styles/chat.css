@@ -1,0 +1,650 @@
+/* ==========================================================================
+ * Nya · 机器学习助教（猫娘形象 + 对话面板）
+ *
+ * DOM（由 `src/core/nya.ts` 生成，这里只管样子）：
+ *
+ *   #nya                     整屏容器，pointer-events: none，z-index: 60
+ *     .nya-mascot            猫娘立绘本体，**同时是可拖拽手柄和开启按钮**
+ *       .nya-mascot-hint     悬停／首次进入时的「问我」气泡
+ *     .nya-panel             对话面板
+ *       .nya-head / .nya-body / .nya-form
+ *
+ * 为什么容器是「整屏 fixed + pointer-events: none」：
+ *   猫娘和面板都要固定在视口上，但如果各自写 `position: fixed`，
+ *   父级一旦有 transform/filter 就会退化成相对父级定位（经典陷阱）。
+ *   用一个整屏容器做定位基准，子元素用 absolute，行为更可预测。
+ *   容器本身不吃点击，否则会挡住整页的文字选择和链接。
+ *
+ * 层级：`.nav` 是 z-index: 50（sticky 吸顶），这里必须高于它。
+ *
+ * ⚠️ 位置全部由 JS 算（`nya.ts` 的 layout()），**不在这里写 left/top** ——
+ *    猫娘可以被拖到任何地方，面板要贴着她的脚下，CSS 写不出这种关系。
+ * ======================================================================== */
+
+#nya {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+
+/* --------------------------------------------------------------------------
+ * 容器不吃点击，只有这两个子元素吃
+ *
+ * ⚠️ 这里**不能**写成 `#nya > *`：`#nya` 是 ID 选择器，权重高过
+ *    「类 + 属性」的组合，会把下面那些 `pointer-events: none`
+ *    （拖拽中、面板打开时的辅助态）直接压掉。
+ *    这个坑之前踩过一次：按钮明明藏起来了却还拦截点击。
+ *    用类选择器打底，权重才在同一量级 —— 谁更具体谁生效。
+ * ------------------------------------------------------------------------ */
+
+.nya-mascot,
+.nya-panel {
+  pointer-events: auto;
+}
+
+/* --------------------------------------------------------------------------
+ * 猫娘立绘
+ * ------------------------------------------------------------------------ */
+
+.nya-mascot {
+  position: absolute;
+  /*
+   * 定高度、宽度随图走。
+   *
+   * 为什么不是定宽度：她有两套立绘 —— 待机时是一张会跑的全身像（接近正方），
+   * 趴到窗口上沿时换成半身像（更高更窄）。定宽度的话，越高的图会被撑得越大，
+   * 两套形象的体量对不上；定高度才能让她们看起来是同一只猫的两种姿势。
+   */
+  height: clamp(124px, 11.5vw, 160px);
+  width: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+
+  /*
+   * 告诉浏览器"这块的手势我自己处理"。
+   * 不写的话，按住拖动会被当成页面滚动，pointermove 直接被吞掉，
+   * 拖拽就变成了"拽不动"。
+   *
+   * ⚠️ 只在桌面端开（见文件末尾的媒体查询）：手机上她是不可拖的，
+   *    这时 `touch-action: none` 会把"从她身上开始的上滑滚动"也吃掉 ——
+   *    小屏上她就在右下角，用户很容易正好从这里起手滑页面。
+   */
+  touch-action: manipulation;
+  /* 拖拽时不要选中文字、不要触发长按菜单 */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+
+  /* z-index 高过面板 —— 她"趴"在面板上沿，必须盖住面板的边框 */
+  z-index: 2;
+
+  /*
+   * 位置变化时平滑移动。落座／回到原位都是这个过渡在做动画。
+   *
+   * ⚠️ 时长和曲线是调过的：她从右下角跳到面板上沿时位移可能接近 500px
+   *    （面板 540px 高，要趴到它上沿就只能落在屏幕右上区域）。
+   *    400ms 以内会像"瞬移"，快了显得是 bug；460ms 配一点回弹
+   *    （1.12 的过冲）才读得出"她跳上去趴着"这个动作。
+   *    拖拽过程中会被 .is-dragging 关掉，否则她会"追"着手指跑。
+   */
+  transition: left 0.46s cubic-bezier(0.34, 1.12, 0.5, 1), top 0.46s cubic-bezier(0.34, 1.12, 0.5, 1);
+}
+
+.nya-mascot.is-dragging {
+  cursor: grabbing;
+  transition: none;
+}
+
+.nya-mascot[data-drag='off'] {
+  cursor: default;
+}
+
+/* 立绘本体 */
+.nya-mascot-img {
+  display: block;
+  height: 100%;
+  width: auto;
+  /* 让点击事件落在 button 上，而不是 img 上 */
+  pointer-events: none;
+  -webkit-user-drag: none;
+  /*
+   * 用 drop-shadow 而不是 box-shadow：它沿**剪影**投影，
+   * 所以抠图的透明边不会被投出一个方框。
+   */
+  filter: drop-shadow(0 6px 14px rgb(var(--nya-shadow) / var(--nya-shadow-a)));
+}
+
+/* 衬底光晕：让她在深色背景上跳出来（用户反馈原来"太不显眼"） */
+.nya-mascot::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  width: 132%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(var(--nya-halo) / var(--nya-halo-a)), transparent 72%);
+  /* 负值是安全的：.nya-mascot 有 z-index，已经是独立层叠上下文，
+     它不会跑到面板或页面内容后面去 */
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* 待机动作：缓慢起伏 + 极轻微的左右摆，像在呼吸 */
+@keyframes nya-idle {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(1.1deg);
+  }
+}
+
+/*
+ * ⚠️ 这层 CSS 起伏**只给"扒着窗口"的那套立绘**（静态图）用。
+ *
+ * 待机用的是会自己跑的动图 —— 它本身就是动的，再叠一层上下起伏
+ * 会让她像在抖。所以待在原地跑的姿势不加这层动画。
+ */
+.nya-mascot[data-pose='perched'] .nya-mascot-img {
+  animation: nya-idle 3.6s ease-in-out infinite;
+}
+
+/*
+ * 趴到面板上沿时**要小一圈**（用户 2026-09-14 的要求）。
+ *
+ * 原因：面板是 380×540，而这张立绘横向铺开接近身高的 1.7 倍。
+ * 按待机的尺寸（最高 160px）趴上去，整只猫占了面板上头一大块，
+ * 比例上头重脚轻 —— 面板反倒成了她的配角。
+ *
+ * 趴着时她是**面板的一部分**（像窗口边上的挂件），所以该按面板来定尺寸；
+ * 待机时她是**独立的东西**，那个尺寸是合适的、别动。
+ */
+.nya-mascot[data-pose='perched'] {
+  height: clamp(92px, 8vw, 118px);
+}
+
+/* --------------------------------------------------------------------------
+ * 耳朵甩动：**没有独立的耳朵图层**
+ *
+ * 这里原本有一组 `.nya-ear` 规则（把耳朵切成独立图层、在 CSS 里 rotate）。
+ * 已删除，原因是实测出的两个问题：
+ *   ① 身体立绘上本来就有耳朵，图层转过之后底下那只静止的耳朵会露出来
+ *      —— 看起来就是"两对耳朵"；
+ *   ② 呼吸动画作用在身体图上，而耳朵图层是它的兄弟节点、不跟着动，
+ *      实测 50% 相位时两者差 9px，同样表现为两对耳朵。
+ *
+ * 现在耳朵的甩动是**烘焙进 `nya-twitch.webp`** 的：加工脚本对整张立绘做
+ * 局部网格形变（耳根不动、耳尖弯得最多），所以整幅画只有一只耳朵，
+ * 结构上不可能再穿模。见 `scripts/prepare_nya_perch.py`。
+ * ------------------------------------------------------------------------ */
+
+/* 被指着的时候"精神一下" */
+.nya-mascot:hover .nya-mascot-img {
+  animation-play-state: paused;
+  transform: translateY(-3px) scale(1.03);
+}
+
+.nya-mascot:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 6px;
+  border-radius: var(--r-lg);
+}
+
+/* 「问我」气泡 */
+.nya-mascot-hint {
+  position: absolute;
+  left: 50%;
+  top: -4px;
+  transform: translate(-50%, -100%);
+  padding: 5px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+  white-space: nowrap;
+  box-shadow: var(--shadow-1);
+  opacity: 0;
+  transition: opacity var(--t-fast);
+  pointer-events: none;
+}
+
+.nya-mascot:hover .nya-mascot-hint,
+.nya-mascot-hint.is-show {
+  opacity: 1;
+}
+
+/* 面板打开后不再提示"问我" —— 已经在聊了。
+   选择器带 #nya，权重高于上面的悬停规则，所以打开时一定压得住。 */
+#nya.is-open .nya-mascot-hint {
+  opacity: 0;
+}
+
+/* --------------------------------------------------------------------------
+ * 对话面板
+ * ------------------------------------------------------------------------ */
+
+.nya-panel {
+  position: absolute;
+  /* 实际位置由 JS 设 inline 的 left/top；这两个只是 JS 跑之前的占位 */
+  left: 8px;
+  top: 8px;
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  height: 540px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-2);
+
+  /* 用 visibility 而不是 display：保留过渡，且隐藏时不占 Tab 焦点 */
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(10px) scale(0.98);
+  transform-origin: 50% 0; /* 从"猫娘那一边"长出来 */
+  transition: opacity var(--t-fast), transform var(--t-fast), visibility var(--t-fast);
+}
+
+.nya-panel.is-open {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+}
+
+/* --------------------------------------------------------------------------
+ * 标题栏
+ * ------------------------------------------------------------------------ */
+
+.nya-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 10px var(--sp-3) 10px var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+  flex: none;
+
+  /*
+   * 标题栏 = 拖面板的抓手（用户 2026-09-14 的要求：面板要能在屏幕上移动）。
+   *
+   * 为什么抓手只有这一条而不是整个上半部分：上半部分是消息列表 ——
+   * 要能选中文字、要能滚动。挂上拖拽之后，想选中一段话就会把面板拖走。
+   * 标题栏是这块面板里唯一没有别的用途的地方。
+   */
+  cursor: grab;
+  /* 拖的时候不要顺手选中"机器学习助教"那几个字 */
+  user-select: none;
+  -webkit-user-select: none;
+  /* 手机上把这块的触摸手势接管过来，否则按住拖动会被当成页面滚动 */
+  touch-action: none;
+}
+
+.nya-head.is-dragging {
+  cursor: grabbing;
+}
+
+.nya-head-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.nya-head-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.nya-head-sub {
+  margin-top: 1px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nya-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color var(--t-fast), background var(--t-fast);
+}
+
+.nya-close:hover {
+  color: var(--text);
+  background: var(--bg);
+}
+
+.nya-close svg {
+  width: 16px;
+  height: 16px;
+}
+
+/*
+ * 「清空」按钮。
+ *
+ * 用文字而不是垃圾桶图标：它紧挨着关闭按钮，两个图标并排很容易点错，
+ * 而这个动作是不可撤销的（记录一删就没了）。
+ * ⚠️ 用 `hidden` 属性控制显隐，所以必须显式写 `[hidden] { display: none }` ——
+ *    下面的 display 会覆盖浏览器的默认样式，否则"藏起来"的按钮仍然占着位置。
+ */
+.nya-clear {
+  flex: none;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: color var(--t-fast), border-color var(--t-fast);
+}
+
+.nya-clear[hidden] {
+  display: none;
+}
+
+.nya-clear:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.nya-clear:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 「在线」小圆点 */
+.nya-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+/* --------------------------------------------------------------------------
+ * 消息区
+ * ------------------------------------------------------------------------ */
+
+.nya-body {
+  flex: 1;
+  min-height: 0; /* 关键：不给最小值，flex 子项不会收缩，滚动条就出不来 */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--sp-4) var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.nya-msg {
+  max-width: 88%;
+  padding: 9px var(--sp-3);
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  /* Nya 的回答按提示词是纯文本（可能带换行），用 pre-wrap 保留段落 */
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.nya-msg.is-nya {
+  align-self: flex-start;
+  background: var(--bg-soft);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: var(--r-sm);
+}
+
+.nya-msg.is-user {
+  align-self: flex-end;
+  background: var(--primary);
+  color: var(--primary-text);
+  border-bottom-right-radius: var(--r-sm);
+}
+
+/* 出错时不装作是正常回答 —— 单独的配色，用户一眼能分辨 */
+.nya-msg.is-err {
+  align-self: flex-start;
+  background: var(--warn-weak);
+  border: 1px solid var(--border);
+  color: var(--warn);
+  font-size: var(--fs-xs);
+}
+
+/* --------------------------------------------------------------------------
+ * 开场引导（还没聊过时显示）
+ * ------------------------------------------------------------------------ */
+
+.nya-hello {
+  padding: var(--sp-3) 0 0;
+}
+
+.nya-hello p {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+.nya-chips {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+
+.nya-chip {
+  padding: 7px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+}
+
+.nya-chip:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-weak);
+}
+
+/* --------------------------------------------------------------------------
+ * 「正在想…」
+ * ------------------------------------------------------------------------ */
+
+.nya-typing {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px;
+  border-radius: var(--r-md);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+}
+
+.nya-typing i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-3);
+  animation: nya-blink 1.2s infinite ease-in-out;
+}
+
+.nya-typing i:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.nya-typing i:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes nya-blink {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+/* --------------------------------------------------------------------------
+ * 输入区
+ * ------------------------------------------------------------------------ */
+
+.nya-form {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-top: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+
+.nya-input {
+  flex: 1;
+  min-width: 0;
+  max-height: 108px;
+  padding: 9px var(--sp-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  resize: none;
+  overflow-y: auto;
+}
+
+.nya-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.nya-input::placeholder {
+  color: var(--text-3);
+}
+
+.nya-send {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-md);
+  background: var(--primary);
+  color: var(--primary-text);
+  cursor: pointer;
+  transition: opacity var(--t-fast);
+}
+
+.nya-send svg {
+  width: 17px;
+  height: 17px;
+}
+
+.nya-send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* --------------------------------------------------------------------------
+ * 滚动到底部时给页脚留出空白带
+ *
+ * 猫娘站在右下角，而演示页底部的分页器（`.pager`）是
+ * `justify-content: space-between` —— 「下一个」按钮也在右下角。
+ * 滚动到底时两者会叠在一起。
+ *
+ * 用类名而不是无条件加内边距：首页没有分页器，不需要多这一截空白。
+ * 类名由 `nya.ts` 在挂载时判断后加（纯 CSS 无法从页脚反向选中分页器）。
+ * ------------------------------------------------------------------------ */
+
+@media (min-width: 641px) {
+  /* 只有桌面端她才是可拖的，所以只有这里需要接管手势 */
+  .nya-mascot {
+    touch-action: none;
+  }
+
+  html.nya-has-pager .footer {
+    padding-bottom: calc(var(--sp-6) + 72px);
+  }
+}
+
+/* --------------------------------------------------------------------------
+ * 移动端
+ *
+ * 手机上不再自由拖拽（面板是整宽抽屉，留缝既没用又难看），
+ * 猫娘缩小、趴在抽屉上沿靠左的位置。
+ * ------------------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  .nya-mascot {
+    height: 116px;
+  }
+
+  .nya-panel {
+    width: auto;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+  }
+}
+
+/* --------------------------------------------------------------------------
+ * 降级：尊重「减少动态效果」
+ * ------------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  .nya-panel,
+  .nya-mascot,
+  .nya-mascot-hint {
+    transition: none;
+  }
+
+  /* 待机起伏停掉；三点闪烁改成常亮 ——
+     动效全停不等于要丢掉"正在加载"这个信息。
+     耳朵甩动不在这里管：它是动图，页面加载时就已经换成了静态图
+     （见 nya.ts 的 perchSrc()）。 */
+  .nya-mascot-img {
+    animation: none;
+  }
+
+  .nya-typing i {
+    animation: none;
+    opacity: 0.6;
+  }
+}

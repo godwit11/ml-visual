@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
     "crosscheck": "python scripts/crosscheck.py",
     "algo:json": "node scripts/crosscheck.mjs",
     "crosscheck:tree": "python scripts/crosscheck_tree.py",
@@ -46,14 +46,22 @@
     "verify:bg:mobile": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/ --script scripts/tests/probe-mobile.js --size 420,900",
     "shot:home": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/ --script scripts/tests/shot-home-dark.js --shot .shots/home-dark.png --viewport",
     "check:heads": "node scripts/check-heads.mjs",
+    "nya:smoke": "node scripts/nya-smoke.mjs",
     "e2e:quality": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/linear-regression/ --script scripts/tests/probe-quality.js",
-    "e2e:quality:mobile": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/linear-regression/ --script scripts/tests/probe-quality.js --size 420,900"
+    "e2e:quality:mobile": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/linear-regression/ --script scripts/tests/probe-quality.js --size 420,900",
+    "e2e:nya": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/linear-regression/ --script scripts/tests/nya-panel.js",
+    "e2e:nya:mobile": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/linear-regression/ --script scripts/tests/nya-panel.js --size 430,900",
+    "check:nya-state": "node scripts/check-nya-state.mjs",
+    "check:server": "node scripts/check-server-path.mjs",
+    "verify:release": "npm run typecheck && npm run build && npm run verify:all",
+    "nya:prompt": "node scripts/nya-prompt.mjs"
   },
   "dependencies": {
     "echarts": "^5.5.1",
     "katex": "^0.16.11"
   },
   "devDependencies": {
+    "@types/node": "^26.5.1",
     "typescript": "~5.6.3",
     "vite": "^5.4.10"
   }

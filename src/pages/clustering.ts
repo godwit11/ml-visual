@@ -8,7 +8,13 @@
  * 这是 K-means 最直观的一张图：几个点像是被数据"吸"过去。
  */
 import type { EChartsOption } from 'echarts'
-import { mountChrome, round, markVisited, mountPager } from '../bootstrap'
+import {
+  mountChrome,
+  round,
+  markVisited,
+  mountPager,
+  provideNyaStateFromPage,
+} from '../bootstrap'
 import { createChart, palette } from '../core/chart'
 import { mountSlider, type SliderHandle } from '../core/slider'
 import { renderMath } from '../core/math'
@@ -407,3 +413,13 @@ if (dataDesc) dataDesc.textContent = ds.desc
 // 首屏直接给"跑完"的结果（好看），想看过程就点「重置」再一步步走
 stepIdx = result.steps.length - 1
 refresh()
+
+
+/* ---------------- Nya 助教：让她看见这一页 ---------------- */
+/*
+ * 用通用读取器，不手写这一页有哪些数字。
+ * 它读的是「屏幕上已经显示出来的字」——指标卡、滑杆、下拉框 ——
+ * 所以拖完滑杆再问她，报的就是新值（每次调用重新读，不缓存）。
+ * 键名要和 chat/nya.ts 里这一页的 stateKeys 逐字一致，否则会被安静地丢掉。
+ */
+provideNyaStateFromPage()

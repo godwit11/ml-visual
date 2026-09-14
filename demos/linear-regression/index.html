@@ -26,6 +26,13 @@
     <div class="container">
       <div class="page-head">
         <div class="crumb"><a href="../../">首页</a> / 基础与评估 / 线性回归</div>
+        <!--
+          入门引导（A 层）：场景开场 + 动手三步，由 core/guide.ts 注入。
+          放在 H1 之前 —— 初学者的第一眼应该是「生活里的这件事」，
+          而不是「手动调参 vs 最小二乘」（后者是写给已经懂的人的悬念）。
+          H1 保留不改：它对懂的人是精准的概括，也是这一页的正式标题。
+        -->
+        <div id="intro"></div>
         <h1>线性回归：手动调参 vs 最小二乘</h1>
         <p>
           数据来自 Boston Housing 的 506 条真实记录：横轴是平均房间数
@@ -148,6 +155,8 @@
           <div class="panel">
             <div class="panel-title">当前表现</div>
             <div class="metric-grid" id="metrics"></div>
+            <!-- 入门引导（B 层）：把上面四个术语翻译成人话 -->
+            <div id="terms"></div>
             <div class="callout callout-tip" id="hint" style="margin-top: 16px"></div>
           </div>
 
@@ -163,6 +172,8 @@
         </aside>
       </div>
 
+      <!-- 入门引导（D 层）：收尾总结，由 core/guide.ts 注入 -->
+      <div id="recap"></div>
       <div class="pager" id="pager"></div>
     </div>
 
