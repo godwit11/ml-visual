@@ -504,6 +504,29 @@ check(
 const clearBtn = panel.querySelector('.nya-clear')
 check('有记录时「清空」按钮可见', !!clearBtn && !clearBtn.hidden)
 
+/*
+ * ⚠️ 真实点击路径：pointerdown 落在**按钮**上时，不能启动面板拖拽。
+ *
+ * 为什么这条非加不可：面板拖拽会调 `head.setPointerCapture()`，而**指针捕获
+ * 会把随后那次 click 的目标改到标题栏上** —— 按钮自己的 click 监听器就不触发了。
+ * 表现是"点清空 / 点关闭没反应"，而且**只有真实鼠标点击才复现**：
+ * 合成事件（`el.click()`）不经过 pointerdown，永远测不到这个 bug。
+ * （2026-09-15 用户在电脑上点不动「清空」和「×」，就是它。）
+ * ⇒ 所以这里派发真实的 pointer 序列，直接查"拖拽有没有被误启动"。
+ */
+const headForClear = panel.querySelector('.nya-head')
+const clearRect = clearBtn.getBoundingClientRect()
+clearBtn.dispatchEvent(pointer('pointerdown', clearRect.left + 6, clearRect.top + 6))
+await sleep(40)
+const clearStartedDrag = headForClear.classList.contains('is-dragging')
+clearBtn.dispatchEvent(pointer('pointerup', clearRect.left + 6, clearRect.top + 6))
+await sleep(40)
+check(
+  '点「清空」不会启动面板拖拽（否则指针捕获会吃掉它的 click）',
+  !clearStartedDrag,
+  clearStartedDrag ? '⚠️ 拖拽被误启动 —— 真实点击时这个按钮会失效' : 'ok',
+)
+
 const msgBox = document.querySelector('.nya-body')
 const beforeClear = msgBox.querySelectorAll('.nya-msg').length
 clearBtn.click()

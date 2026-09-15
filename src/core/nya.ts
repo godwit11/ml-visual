@@ -738,6 +738,21 @@ function wireNya(root: HTMLElement, mascot: HTMLButtonElement, panel: HTMLElemen
   }
 
   head.addEventListener('pointerdown', (e) => {
+    /*
+     * ⚠️ 标题栏里的按钮（「清空」和「×」）必须先放行 —— 2026-09-15 用户报的就是这个。
+     *
+     * 不排除的话：按在按钮上时 pointerdown 冒泡到这里 → 启动拖拽 →
+     * 下面那句 `head.setPointerCapture()` 会把指针**捕获到标题栏上**。
+     * 而按规范，click 事件派发到「pointerdown 目标与 pointerup 目标的最近公共祖先」——
+     * pointerup 被捕获后目标成了标题栏，于是 **click 也落到标题栏上**，
+     * 按钮自己的 click 监听器根本不触发。表现就是「按钮点了没反应」。
+     *
+     * ⚠️ 为什么测试没抓到：驱动里的 `el.click()` 是**合成事件**，
+     *    不走 pointerdown/pointerup，指针捕获无从介入。所以断言必须派发
+     *    真实的 pointer 序列（见 `scripts/tests/nya-panel.js` 里那条
+     *    「点『清空』不会启动面板拖拽」）。
+     */
+    if ((e.target as Element | null)?.closest('button')) return
     if (e.pointerType === 'mouse' && e.button !== 0) return
     panelGrab = {
       id: e.pointerId,
