@@ -776,3 +776,21 @@ function formatDiff(
   }
   return rows.join('\n')
 }
+
+/* ------------------------------------------------------------------ *
+ * 兜底：这个文件本身也是个「函数」
+ *
+ * 纯数据 + 纯函数的模块，本来不该有 default 导出。加它是因为 Vercel
+ * 会把 `/api` 下**不带下划线**的每个 `.ts` 都当函数入口编译 ——
+ * 那正是让 `api/handler.ts` 能 import 到它的唯一办法
+ * （因果链写在 `api/chat.ts` 顶部）。副作用是它顺带成了可访问的网址
+ * `/api/nya`，没有 default 导出时会被 Vercel 报 500；给个 404 干净些。
+ * ------------------------------------------------------------------ */
+
+export default {
+  fetch: () =>
+    new Response(JSON.stringify({ error: 'NOT_FOUND', message: '这个地址不是接口' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    }),
+}

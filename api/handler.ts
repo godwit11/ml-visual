@@ -9,9 +9,24 @@
  * ⚠️ 密钥只从环境变量读，永远不写进代码、不下发给浏览器。
  *    这是"加一层代理"的全部意义 —— 浏览器只知道自己问了一个问题，
  *    永远拿不到 token。
+ *
+ * ⚠️ 这个文件**必须**待在 `/api` 目录里、而且**名字不能带下划线**。
+ *    理由（两条 Vercel 规则叠加）写在 `api/chat.ts` 顶部，改动前先读一遍。
  */
 
-import { buildSystemPrompt, type ChatMessage, type ChatContextPayload } from './nya'
+/*
+ * ⚠️ 扩展名 `.js` 不能省。
+ *
+ * `package.json` 里有 `"type": "module"` ⇒ 产物是 ESM，而 Node 的 ESM
+ * 解析器**不做扩展名猜测**（不像 CommonJS 会试 .js / .json / index.js）。
+ * Vercel 把 TS 编译成 JS 后**原样保留** import 里的路径字符串，所以
+ * 写 `'./nya'` 在线上就是 `Cannot find module` —— 2026-09-15 那次
+ * 线上 500 的两个成因之一。
+ *
+ * 源文件是 `nya.ts`，但这里**必须**写成 `nya.js`：编译之后存在的是 .js。
+ * 本地 dev / typecheck 都不会报错，所以改这里之后记得跑 `npm run check:vercel`。
+ */
+import { buildSystemPrompt, type ChatMessage, type ChatContextPayload } from './nya.js'
 
 /* ------------------------------------------------------------------ *
  * 请求限制
@@ -396,4 +411,24 @@ function extractText(data: unknown): string {
   const content = (choices[0] as { message?: { content?: unknown } })?.message?.content
   if (typeof content !== 'string') return ''
   return stripThinking(content)
+}
+
+/* ------------------------------------------------------------------ *
+ * 兜底：这个文件本身也是个「函数」
+ *
+ * Vercel 会把 `/api` 下**不带下划线**的每个 `.ts` 都当函数入口编译
+ * —— 这正是让 `api/chat.ts` 能 import 到它的唯一办法（因果链写在
+ * `api/chat.ts` 顶部）。副作用是它顺带成了一个可访问的网址
+ * （`/api/handler`）。如果这里没有 default 导出，Vercel 找不到
+ * handler 会回一个**看起来像故障的 500**；给个明确的 404 干净些。
+ *
+ * 真正处理对话的是 `api/chat.ts`，这个文件只提供 `handleChat`。
+ * ------------------------------------------------------------------ */
+
+export default {
+  fetch: () =>
+    new Response(JSON.stringify({ error: 'NOT_FOUND', message: '这个地址不是接口' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    }),
 }

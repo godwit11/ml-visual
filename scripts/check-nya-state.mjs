@@ -4,7 +4,7 @@
  * ------------------------------------------------------------------ *
  * 为什么需要这个脚本
  * ------------------------------------------------------------------ *
- * `chat/nya.ts` 里的 `stateKeys` 是一张白名单：**不在名单里的键会被安静丢掉**。
+ * `api/nya.ts` 里的 `stateKeys` 是一张白名单：**不在名单里的键会被安静丢掉**。
  * 这个设计本身是对的（它挡住了"往里塞任意文本"这条路），
  * 但它有一个很坏的失败方式：**不报错**。
  *
@@ -13,7 +13,7 @@
  * 用户第一版就是这么翻车的（他在模型评估页问表格，Nya 让他去线性回归页）。
  *
  * 所以这里做一次**端到端核对**：
- *   ① 从 `chat/nya.ts` 里把这个 id 的 stateKeys 抠出来
+ *   ① 从 `api/nya.ts` 里把这个 id 的 stateKeys 抠出来
  *   ② 在真实浏览器里打开那一页，截下 Nya 真正收到的请求体
  *   ③ 对差集：谁多谁少，逐条列出来
  *
@@ -34,17 +34,17 @@ const PORT = 4176
 const BASE = `http://127.0.0.1:${PORT}`
 
 /* ------------------------------------------------------------------ *
- * ① 从 chat/nya.ts 里抠出每个 id 的 stateKeys
+ * ① 从 api/nya.ts 里抠出每个 id 的 stateKeys
  * ------------------------------------------------------------------ */
 
 /**
  * 为什么用正则抠而不是 import：
- *   `chat/nya.ts` 是服务端 TypeScript，这个脚本是 node 脚本，没有编译步骤。
+ *   `api/nya.ts` 是服务端 TypeScript，这个脚本是 node 脚本，没有编译步骤。
  *   文件是我们自己写的、格式稳定，正则够用；万一格式变了，
  *   下面的"一个 id 都没解析出来"会立刻炸掉，不会安静地放过去。
  */
 function readWhitelist() {
-  const src = readFileSync(join(ROOT, 'chat', 'nya.ts'), 'utf8')
+  const src = readFileSync(join(ROOT, 'api', 'nya.ts'), 'utf8')
   const out = new Map()
 
   const idRe = /id:\s*'([a-z0-9-]+)'/g
@@ -112,7 +112,7 @@ function runProbe(demoId) {
  */
 const whitelist = readWhitelist()
 if (whitelist.size === 0) {
-  console.error('❌ 一个 demo 的 stateKeys 都没解析出来 —— chat/nya.ts 的格式变了吗？')
+  console.error('❌ 一个 demo 的 stateKeys 都没解析出来 —— api/nya.ts 的格式变了吗？')
   process.exit(1)
 }
 
@@ -170,7 +170,7 @@ try {
 
 console.log('')
 if (failed > 0) {
-  console.log(`❌ ${failed} 页有键被丢掉 —— 去 chat/nya.ts 把 stateKeys 改成和页面上一致`)
+  console.log(`❌ ${failed} 页有键被丢掉 —— 去 api/nya.ts 把 stateKeys 改成和页面上一致`)
   process.exit(1)
 }
 console.log(`✅ 全部 ${whitelist.size} 页都对上了${warned ? `（另有 ${warned} 页有暂时没上报的键，不影响）` : ''}`)

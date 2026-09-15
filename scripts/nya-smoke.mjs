@@ -63,7 +63,7 @@ if (!process.env.MINIMAX_API_KEY) {
 /* ---------------- 把 TS 加载进来 ---------------- */
 
 const built = await build({
-  entryPoints: [resolve(root, 'chat/handler.ts')],
+  entryPoints: [resolve(root, 'api/handler.ts')],
   bundle: true,
   write: false,
   format: 'cjs',
@@ -92,7 +92,7 @@ const prevFile = flag('prev', null)
 
 /* ---------------- 用来判"编数字"的已知事实 ----------------
  *
- * 这些数字全部来自 chat/nya.ts 的知识表 + 这次用例上报的页面状态。
+ * 这些数字全部来自 api/nya.ts 的知识表 + 这次用例上报的页面状态。
  * 改知识表时这里要跟着改 —— 这本身就是一次有用的对账。
  *
  * ⚠️ 只查「具体小数」（带小数点的），因为整数太容易出现在

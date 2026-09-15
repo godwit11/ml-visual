@@ -15,5 +15,5 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["chat", "api", "vite.config.ts"]
+  "include": ["api", "vite.config.ts"]
 }

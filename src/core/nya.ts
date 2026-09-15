@@ -14,7 +14,7 @@
  *
  * 1. **面板不持有业务知识。**
  *    「这一页讲什么」「有哪些术语」「正确数字是多少」全部在服务端
- *    （`chat/nya.ts`）。前端只做两件事：把学生的问题发出去、
+ *    （`api/nya.ts`）。前端只做两件事：把学生的问题发出去、
  *    把页面当前的状态**按白名单键名**报上去。
  *    这样即使有人改前端（或者伪造请求），也塞不进假"事实"进提示词。
  *
@@ -99,7 +99,7 @@ export function provideNyaState(fn: StateProvider): void {
  * ⚠️ 每次调用都**重新读 DOM**，不许缓存 —— 学生拖完滑杆再问，报的必须是新值。
  *    报一个过期的数字比不报更糟（他会以为 Nya 在胡说）。
  *
- * ⚠️ 值的长度由服务端再截一次（`chat/nya.ts` 的 formatState），
+ * ⚠️ 值的长度由服务端再截一次（`api/nya.ts` 的 formatState），
  *    这里只负责"取到页面上真实显示的那串字"。
  *
  * @param extra 额外补充的键值（比如页面上没显示的内部量）。键名同样受
@@ -504,9 +504,9 @@ function wireNya(root: HTMLElement, mascot: HTMLButtonElement, panel: HTMLElemen
 
   const clamp = (v: number, lo: number, hi: number) => (hi < lo ? lo : Math.min(Math.max(v, lo), hi))
 
-  const applyMascot = () => {
-    mascot.style.left = `${Math.round(pos.x)}px`
-    mascot.style.top = `${Math.round(pos.y)}px`
+  const applyMascot = (x = pos.x, y = pos.y) => {
+    mascot.style.left = `${Math.round(x)}px`
+    mascot.style.top = `${Math.round(y)}px`
   }
 
   const layout = () => {
@@ -951,7 +951,7 @@ function wireNya(root: HTMLElement, mascot: HTMLButtonElement, panel: HTMLElemen
    *
    * ⚠️ 服务端收到的上下文里，这些消息可能来自**别的页面**
    *    （比如在线性回归问完 MSE，换到 PCA 页继续问）。
-   *    这一点在提示词里也说明了（见 chat/nya.ts 的数字纪律）：
+   *    这一点在提示词里也说明了（见 api/nya.ts 的数字纪律）：
    *    旧消息里的数字属于当时的页面，不能当成当前页的状态。
    */
   if (history.length > 0) {
@@ -1030,7 +1030,7 @@ function wireNya(root: HTMLElement, mascot: HTMLButtonElement, panel: HTMLElemen
         lastPageId = pageId
         lastState = now ?? null
       } else {
-        /* 服务端的 message 已经是给人看的中文（见 chat/handler.ts），
+        /* 服务端的 message 已经是给人看的中文（见 api/handler.ts），
          * 拿不到就用兜底文案。这里不暴露错误码 —— 学生不需要知道 HTTP 状态。 */
         addBubble(data.message ?? 'Nya 这边出了点问题，等一下再试试。', 'err')
       }

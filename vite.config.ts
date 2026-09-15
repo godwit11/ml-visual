@@ -3,7 +3,7 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, readdirSync } from 'node:fs'
 import type { IncomingMessage } from 'node:http'
-import { handleChat } from './chat/handler'
+import { handleChat } from './api/handler.js'
 
 const root = dirname(fileURLToPath(import.meta.url))
 
@@ -29,8 +29,13 @@ function demoEntries(): Record<string, string> {
  *   AI 功能完全没法测，只能推上去试，一次一轮，非常慢。
  *
  *   这个插件给 Vite 的 dev server 挂一段中间件，把 `/api/chat` 的请求
- *   交给同一份 `chat/handler.ts`。好处是**本地和线上跑的是同一份逻辑**，
- *   不存在"本地好好的、推上去就坏"这类问题。
+ *   交给 `api/handler.ts` —— 和线上 `api/chat.ts` 调的是同一份逻辑。
+ *
+ *   ⚠️ 但"同一份逻辑"**只保证代码一致，不保证运行环境一致**。
+ *      2026-09-15 就翻过一次车：本地聊得好好的，线上 500。
+ *      原因是 Vercel 只编译 `/api` 目录下的 TS，而当时那两个文件在
+ *      项目根的 `chat/` 里，**整个目录都没进函数包**（详见 api/chat.ts）。
+ *      ⇒ **本地能聊不能证明线上能跑**；服务端有改动，上线后必须实测一次。
  *
  * 密钥从哪来：
  *   项目根目录的 `.env.local`（已在 .gitignore 里，不会进仓库）。

@@ -35,7 +35,7 @@ process.env.MINIMAX_MODEL ||= 'test-model'
 process.env.NYA_ALLOWED_ORIGINS ||= 'http://localhost:5173'
 
 const built = await build({
-  entryPoints: [resolve(root, 'chat/handler.ts')],
+  entryPoints: [resolve(root, 'api/handler.ts')],
   bundle: true,
   write: false,
   format: 'cjs',

@@ -43,7 +43,7 @@ if (existsSync(envPath)) {
 }
 
 const built = await build({
-  entryPoints: [resolve(root, 'chat/handler.ts')],
+  entryPoints: [resolve(root, 'api/handler.ts')],
   bundle: true,
   write: false,
   format: 'cjs',
