@@ -102,7 +102,34 @@ function nyaDevApi(mode: string): Plugin {
       const response = await handleChat(request)
       res.statusCode = response.status
       response.headers.forEach((value, key) => res.setHeader(key, value))
-      res.end(Buffer.from(await response.arrayBuffer()))
+
+      /*
+       * ⚠️ 这里必须**边收边写**。
+       *
+       * 原来写的是 `res.end(Buffer.from(await response.arrayBuffer()))` ——
+       * 那会等整个流结束才拿到内容，等于**在本地把流式又攒成了一次性**：
+       * 开发时看不到逐字效果，前端的分帧逻辑也永远测不到，
+       * 只能推上线才发现问题（这个项目已经在"本地看不出线上问题"上
+       * 栽过一次，见 api/chat.ts 顶部）。
+       */
+      if (response.body) {
+        /*
+         * ⚠️ 先把响应头**显式发出去**，不能等第一次 `write()`。
+         *
+         * Node 默认在第一次 write 时才发送响应头，而流式下第一次 write
+         * 要等到上游的第一个 token 到达 —— 于是"请求已被接受"这件事
+         * 被推迟到和第一个字同时发生（实测：响应头 2.22s 到，和首字同一时刻）。
+         * 提前发头之后，浏览器能立刻知道连接已建立。
+         */
+        res.flushHeaders()
+        const reader = response.body.getReader()
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          res.write(Buffer.from(value))
+        }
+      }
+      res.end()
     } catch (err) {
       res.statusCode = 500
       res.setHeader('Content-Type', 'application/json; charset=utf-8')

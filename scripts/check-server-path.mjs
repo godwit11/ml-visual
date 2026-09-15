@@ -51,9 +51,43 @@ const results = []
 const check = (name, ok, extra) => results.push({ name, ok: !!ok, extra })
 
 let sent = null
+let upstreamMode = 'json'
+let upstreamChunks = []
+
+/**
+ * 造一条**上游 SSE 流**，而且保证"一次 read 拿到一块"。
+ *
+ * 用 `pull` 而不是在 `start` 里连着 enqueue：`start` 里连续 enqueue 的话，
+ * 消费方一次 `read()` 可能把几块**合并**拿走，于是"跨块分帧"根本没发生，
+ * 断言变成空的（前端测试里踩过这个坑，见 scripts/tests/nya-panel.js）。
+ * `pull` 由消费驱动，来一块、喂一块。
+ */
+const sseStream = (chunks) => {
+  let i = 0
+  return new ReadableStream({
+    pull(c) {
+      if (i >= chunks.length) {
+        c.close()
+        return
+      }
+      c.enqueue(new TextEncoder().encode(chunks[i++]))
+    },
+  })
+}
+
 globalThis.fetch = async (url, init) => {
   if (!String(url).includes('/chat/completions')) throw new Error(`不该请求别处：${url}`)
   sent = JSON.parse(init.body)
+
+  if (upstreamMode === 'error') {
+    return new Response('{"base_resp":{"status_msg":"login fail"}}', { status: 401 })
+  }
+  if (upstreamMode === 'sse') {
+    return new Response(sseStream(upstreamChunks), {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    })
+  }
   return new Response(JSON.stringify({ choices: [{ message: { content: '（桩）' } }] }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
@@ -70,6 +104,38 @@ const ask = async (question, context) => {
     }),
   )
   return { status: res.status, system: sent?.messages?.[0]?.content ?? '' }
+}
+
+/**
+ * 走**流式**那条路：请求带 `stream: true`、假上游吐 SSE，
+ * 把我们的 NDJSON 响应体读回来切成帧，方便逐项断言。
+ */
+const askStream = async () => {
+  sent = null
+  const res = await handleChat(
+    new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'http://localhost:5173' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: '这一页怎么样？' }],
+        context: { demoId: 'linear-regression' },
+        stream: true,
+      }),
+    }),
+  )
+  const ctype = res.headers.get('content-type') ?? ''
+  const text = await res.text()
+  const frames = text
+    .split('\n')
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l))
+  return {
+    status: res.status,
+    ctype,
+    frames,
+    reply: frames.map((f) => (typeof f.t === 'string' ? f.t : '')).join(''),
+    payload: sent,
+  }
 }
 
 const BASE = {
@@ -142,6 +208,86 @@ check(
 check('temperature 已显式设置（默认 1 会让同一提示词两次结果不同）', sent?.temperature !== undefined, sent?.temperature)
 check('思考已关闭', JSON.stringify(sent?.thinking) === '{"type":"disabled"}')
 check('提示词里没有密钥', !/sk-|api[_-]?key/i.test(wl.system))
+
+/* ---------- ⑤ 流式链路 ---------- */
+
+/*
+ * 这一段盯的是"上游的 SSE 有没有被正确翻译成我们的 NDJSON"。
+ *
+ * 为什么必须在这一层测：它是**唯一**能同时看到"发给上游什么"和
+ * "吐给前端什么"的地方。面板测试用的是自己造的假后端 ——
+ * 假后端怎么造，就决定了前端能验到什么；服务端这段解析代码
+ * 前端完全看不到（正是这个文件顶部那段"静默丢字段"的教训）。
+ */
+
+upstreamMode = 'sse'
+/** 上游 SSE 的一帧 */
+const sseFrame = (o) => `data: ${JSON.stringify(o)}\n\n`
+/**
+ * 把一帧切成两块，切点落在 **JSON 中间**。
+ *
+ * ⚠️ 这一步不能省。第一版是把一帧一帧顺着喂过去 —— 每个 chunk 都和行边界
+ *    对齐，于是"没写残行缓冲"的反证**照样全绿**：每块本来就是完整的一行，
+ *    缓冲与否没有区别。真实网络的 TCP 分包根本不看行边界，
+ *    造不出"半行"就等于没在测分帧。
+ */
+const splitFrame = (o, at) => {
+  const s = sseFrame(o)
+  return [s.slice(0, at), s.slice(at)]
+}
+
+upstreamChunks = [
+  /* 上游的两帧被切成三条包 —— 这是常态，不是异常 */
+  `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: '让我先想想……' } }] })}\n`,
+  `\ndata: ${JSON.stringify({ choices: [{ delta: { content: '这' } }] })}\n`,
+  `\ndata: ${JSON.stringify({ choices: [{ delta: { content: '就是一句话' } }] })}\n\n`,
+  `data: ${JSON.stringify({ choices: [{ delta: { content: '\n\n答案：' } }] })}\n\n`,
+  /* 被 "reasoning_split + disabled thinking" 挡在外面的那种泄漏，兜底也要剥掉 */
+  `data: ${JSON.stringify({ choices: [{ delta: { content: '<think>偷偷想</think>' } }] })}\n\n`,
+  /* 最后一帧（带 finish_reason）被**切成两半**，切点就在 JSON 中间 */
+  ...splitFrame({ choices: [{ delta: { content: '线性回归' }, finish_reason: 'stop' }] }, 18),
+  'data: [DONE]\n\n',
+]
+
+const st = await askStream()
+
+check('流式：发给上游的 payload 带上了 stream', st.payload?.stream === true, st.payload?.stream)
+check('流式：响应体是 NDJSON（前端靠这个判据分流）', st.ctype.includes('x-ndjson'), st.ctype)
+check(
+  '流式：跨包切断的 SSE 能被拼回来',
+  st.reply === '这就是一句话\n\n答案：线性回归',
+  JSON.stringify(st.reply),
+)
+/*
+ * 🔴 这两条是"思考不上屏"。它坏掉的方式特别难发现 ——
+ *    不报错、不截断，只是学生的屏幕上多出一段模型的推理过程，
+ *    而且**先把答案剧透一遍**。
+ */
+check('流式：reasoning_content 不上屏', !st.reply.includes('让我先想想'), JSON.stringify(st.reply))
+check('流式：<think> 标签被剥掉', !st.reply.includes('偷偷想') && !st.reply.includes('<think'))
+check(
+  '流式：正常结束会给出 done 帧和 finish_reason',
+  st.frames.at(-1)?.done === true && st.frames.at(-1)?.finish === 'stop',
+  st.frames.at(-1),
+)
+
+/* --- 只有思考、没有正文：必须算"没说话"，不能显示空白气泡 --- */
+upstreamChunks = [
+  `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: '想了半天' } }] })}\n\n`,
+  'data: [DONE]\n\n',
+]
+const empty = await askStream()
+check('流式：一个字都没有时，末尾补一条 error 帧', empty.frames.some((f) => f.error === 'EMPTY_REPLY'), empty.frames)
+check('流式：进度帧不会被当成正文', empty.reply === '', JSON.stringify(empty.reply))
+
+/* --- 上游失败必须在**进入流之前**拦住，否则前端拿不到体面的错误 --- */
+upstreamMode = 'error'
+const bad = await askStream()
+check(
+  '流式：上游非 2xx 时仍回 JSON + 502（前端走错误气泡，不是把错误当正文显示）',
+  bad.status === 502 && bad.ctype.includes('json') && bad.reply === '',
+  `${bad.status} ${bad.ctype}`,
+)
 
 /* ---------- 汇总 ---------- */
 

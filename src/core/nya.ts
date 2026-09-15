@@ -346,6 +346,83 @@ const CHIPS: Record<string, string[]> = {
 
 const CHIPS_FALLBACK = ['机器学习到底在干什么？', '我应该从哪一页开始看？']
 
+/**
+ * 服务端流式输出的媒体类型（对应 `api/handler.ts` 里的 `NDJSON_CONTENT_TYPE`）。
+ *
+ * 为什么前端要**靠它分流**而不是"有 body 就当流"：
+ *   服务端的错误（未配置 503、上游 401/超时/非 2xx）仍然是普通的 JSON ——
+ *   那是**进入流之前**就决定的，还来得及给一个体面的状态码和中文提示。
+ *   所以响应只有两种形态：`x-ndjson` = 逐字正文，`json` = 一条完整消息。
+ *   两边都认这一个判据，就不会出现"把错误 JSON 当正文逐字显示出来"。
+ *
+ * ⚠️ 改这里要同时改 `api/handler.ts`。判据不一致的后果不是报错，
+ *    而是**错误信息被当成回答渲染**（或者反过来，回答被丢掉）。
+ */
+const NDJSON_TYPE = 'application/x-ndjson'
+
+/**
+ * 读 Nya 的 NDJSON 流。
+ *
+ * 每帧一行 JSON：
+ *   `{"t":"正文增量"}` · `{"done":true,"finish":"stop"}` · `{"error":"CODE","message":"中文提示"}`
+ *
+ * 为什么要处理"半行"：TCP 怎么切包不由我们决定 —— 一个 chunk 可能
+ * 正好切在某个 JSON 的中间。所以**残片一律留在缓冲区里等下一块**，
+ * 只有凑齐一整行（见到 `\n`）才 parse。这是流式解析唯一必须做对的事，
+ * 而它恰恰是最容易漏的：在本地测试时响应往往是一整块到齐的，
+ * 写错也看不出来。
+ *
+ * 中途断流（`done` 帧没来）时**不报错** —— 已经上屏的字是真实回答的一部分，
+ * 保留它比丢掉它更对。只有"一个字都没收到"才值得提示用户。
+ */
+async function readNyaStream(
+  body: ReadableStream<Uint8Array>,
+  onDelta: (replySoFar: string) => void,
+): Promise<{ reply: string; error: string }> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  let reply = ''
+  let error = ''
+
+  for (;;) {
+    let chunk: ReadableStreamReadResult<Uint8Array>
+    try {
+      chunk = await reader.read()
+    } catch {
+      /*
+       * 读到一半连接断了（断网、切页、或者 Vercel 函数到了 300s 上限）。
+       * **不往上抛** —— 已收到的字是真实回答的一部分，保留它；
+       * 抛出去的话外层会再补一条"连不上 Nya"，看起来像整段回答作废了。
+       * 一个字都没收到的情况下，调用方自然走错误分支（有兜底文案）。
+       */
+      break
+    }
+    if (chunk.done) break
+    buf += decoder.decode(chunk.value, { stream: true })
+    let nl: number
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, nl)
+      buf = buf.slice(nl + 1)
+      if (!line.trim()) continue
+      let frame: { t?: unknown; error?: unknown; message?: unknown }
+      try {
+        frame = JSON.parse(line) as typeof frame
+      } catch {
+        /* 坏行跳过，不因为一帧毁了整段回答 */
+        continue
+      }
+      if (typeof frame.t === 'string' && frame.t) {
+        reply += frame.t
+        onDelta(reply)
+      } else if (typeof frame.error === 'string') {
+        error = typeof frame.message === 'string' ? frame.message : ''
+      }
+    }
+  }
+  return { reply, error }
+}
+
 /* ------------------------------------------------------------------ *
  * 构建 DOM
  * ------------------------------------------------------------------ */
@@ -967,6 +1044,23 @@ function wireNya(root: HTMLElement, mascot: HTMLButtonElement, panel: HTMLElemen
     body.scrollTop = body.scrollHeight
   }
 
+  /**
+   * 滚到底，但**攒到下一帧只滚一次**。
+   *
+   * 流式输出时每收到一个字都要把新内容带进视野，那是每秒几十次的
+   * 布局读取（`scrollHeight` 会强制重排）+ 写入。直接滚会把主线程占满，
+   * 反而让文字长得一顿一顿 —— 本末倒置。攒到 rAF 里合并成一次即可。
+   */
+  let scrollQueued = false
+  const scrollSoon = () => {
+    if (scrollQueued) return
+    scrollQueued = true
+    requestAnimationFrame(() => {
+      scrollQueued = false
+      scrollDown()
+    })
+  }
+
   const addBubble = (text: string, kind: 'nya' | 'user' | 'err'): HTMLElement => {
     const el = document.createElement('div')
     el.className = `nya-msg is-${kind}`
@@ -1056,21 +1150,71 @@ function wireNya(root: HTMLElement, mascot: HTMLButtonElement, panel: HTMLElemen
           /* 只发最近若干轮：更早的对话对当前问题没什么帮助，却要按量付费 */
           messages: history.slice(-10),
           context: { demoId: pageId, state: now, prev: prev ?? undefined },
+          /*
+           * 要逐字输出。服务端按这个开关决定回 NDJSON 流还是回一次性 JSON
+           * （见 api/handler.ts）。**它是请求方的选择**，因为自动化检查
+           * （check:server / nya:smoke）走的还是那条一次性 JSON 的路。
+           */
+          stream: true,
         }),
       })
 
-      const data = (await res.json().catch(() => ({}))) as { reply?: string; message?: string }
+      const kind = (res.headers.get('content-type') ?? '').split(';')[0].trim()
 
-      if (res.ok && data.reply) {
-        history.push({ role: 'assistant', content: data.reply })
-        saveChat(history)
-        addBubble(data.reply, 'nya')
-        lastPageId = pageId
-        lastState = now ?? null
+      if (res.ok && kind === NDJSON_TYPE && res.body) {
+        /*
+         * 流式：**先把气泡建出来**（内容是空的），再逐字往里填。
+         *
+         * 这样「···」能在第一个字到达的那一刻立刻撤掉 —— 学生看到的顺序是
+         * "省略号 → 字一个一个长出来"，而不是"省略号 → 一整段啪地出现"。
+         * 后者正是改流式之前的样子：明明 0.9 秒就有第一个字了，
+         * 却非要等 2.6 秒把整段收完才显示（实测数据见 devlog-21）。
+         */
+        const bubble = addBubble('', 'nya')
+        let painted = false
+
+        const { reply, error } = await readNyaStream(res.body, (soFar) => {
+          if (!painted) {
+            painted = true
+            typing.remove()
+          }
+          /* 整量重设而不是追加：不会因为丢过一帧就拼出重复文字 */
+          bubble.textContent = soFar
+          scrollSoon()
+        })
+
+        if (reply) {
+          /*
+           * ⚠️ 中途断流也会走到这里（`reply` 有内容、但没有 `done` 帧）。
+           *    那时保留已收到的文字是**对的** —— 那是她真实回答的一部分，
+           *    丢掉它反而像"她答了一半就不见了"。
+           */
+          history.push({ role: 'assistant', content: reply })
+          saveChat(history)
+          lastPageId = pageId
+          lastState = now ?? null
+        } else {
+          /* 一个字都没来。把那个空壳气泡撤掉，换成错误提示 ——
+           * 文案来自服务端在流末尾补的 error 帧；拿不到就用兜底 */
+          bubble.remove()
+          addBubble(error || 'Nya 这边出了点问题，等一下再试试。', 'err')
+        }
       } else {
-        /* 服务端的 message 已经是给人看的中文（见 api/handler.ts），
-         * 拿不到就用兜底文案。这里不暴露错误码 —— 学生不需要知道 HTTP 状态。 */
-        addBubble(data.message ?? 'Nya 这边出了点问题，等一下再试试。', 'err')
+        /* 非流式：服务端在进入流之前就失败了（未配置 / 上游报错 / 超时），
+         * 回的是普通 JSON。这段逻辑和改流式之前完全一样。 */
+        const data = (await res.json().catch(() => ({}))) as { reply?: string; message?: string }
+
+        if (res.ok && data.reply) {
+          history.push({ role: 'assistant', content: data.reply })
+          saveChat(history)
+          addBubble(data.reply, 'nya')
+          lastPageId = pageId
+          lastState = now ?? null
+        } else {
+          /* 服务端的 message 已经是给人看的中文（见 api/handler.ts），
+           * 拿不到就用兜底文案。这里不暴露错误码 —— 学生不需要知道 HTTP 状态。 */
+          addBubble(data.message ?? 'Nya 这边出了点问题，等一下再试试。', 'err')
+        }
       }
     } catch {
       /* 网络层失败（断网、被拦截、超时）。强调页面其他功能正常，避免学生以为站点坏了 */

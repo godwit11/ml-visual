@@ -362,10 +362,14 @@ const fakeFetch = (handler) => {
   }
 }
 
-const submit = async (text) => {
+const submitNoWait = (text) => {
   input.value = text
   input.dispatchEvent(new Event('input', { bubbles: true }))
   form.requestSubmit()
+}
+
+const submit = async (text) => {
+  submitNoWait(text)
   await sleep(350)
 }
 
@@ -374,19 +378,82 @@ const lastBubble = () => {
   return all[all.length - 1]
 }
 
-/* --- 正常回答 --- */
-fakeFetch(
-  async () =>
-    new Response(JSON.stringify({ reply: '（假回答）你先看看那条线是斜的还是平的。' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
+/* ------------------------------------------------------------------ *
+ * 流式的假后端
+ *
+ * 要像真后端一样**一行一帧**地吐 NDJSON（见 api/handler.ts 的
+ * `streamChat`）。三种形状都要能造出来：
+ *   · 一次吐完（大多数情况）
+ *   · **在任意字节处切一刀**（模拟 TCP 分包）
+ *   · 手控节奏（验证"逐字上屏"，而不是"整段一起出现"）
+ * ------------------------------------------------------------------ */
+
+const enc = new TextEncoder()
+const frameBytes = (obj) => enc.encode(`${JSON.stringify(obj)}\n`)
+
+/**
+ * 把若干帧拼成一条流，**一次交付**。
+ *
+ * ⚠️ 它**不适合用来造"分包"** —— 踩过两次：
+ *    · 连着 `enqueue` 两块再 `close`：浏览器交付时合并成一个 chunk，
+ *      分包压根没发生，于是去掉前端 `{stream:true}` 做反证时**照样全绿**。
+ *    · 改成两次 enqueue 之间 `setTimeout(25)` 隔开：在我这边的同步探针里
+ *      确实分两次到达（探针拿到了 2 块），但走**真实前端路径**时又被合并了 ——
+ *      中间隔着 `addBubble()` 里的 `scrollDown()`，那是一次强制重排，
+ *      几十毫秒过去，第二块早到了。
+ *   ⇒ 造分包只有一条稳的路：**手控节奏**（见下面的 `controlledStream`），
+ *     测试自己决定"什么时候来下一块"，不跟浏览器的交付时机赛跑。
+ */
+const ndjsonBody = (frames) => {
+  const parts = frames.map(frameBytes)
+  return new ReadableStream({
+    start(c) {
+      for (const p of parts) c.enqueue(p)
+      c.close()
+    },
+  })
+}
+
+const ndjsonResponse = (frames) =>
+  new Response(ndjsonBody(frames), {
+    status: 200,
+    headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' },
+  })
+
+/** 手控节奏的流：由测试决定"下一帧/下一块什么时候到" */
+let feed = null
+let feedRaw = null
+let endStream = null
+const controlledStream = () => {
+  feed = null
+  feedRaw = null
+  endStream = null
+  const body = new ReadableStream({
+    start(c) {
+      feed = (obj) => c.enqueue(frameBytes(obj))
+      /* 直接喂原始字节，用来把一块**切在半个汉字中间** */
+      feedRaw = (bytes) => c.enqueue(bytes)
+      endStream = () => c.close()
+    },
+  })
+  return new Response(body, {
+    status: 200,
+    headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' },
+  })
+}
+
+
+/* --- 正常回答（流式）--- */
+const REPLY = '（假回答）你先看看那条线是斜的还是平的。'
+fakeFetch(async () =>
+  ndjsonResponse([{ t: '（假回答）你先看看' }, { t: '那条线是斜的还是平的。' }, { done: true, finish: 'stop' }]),
 )
 await submit('测试：正常回答')
 
 const okBubble = lastBubble()
 check('正常回答渲染成 Nya 气泡', okBubble?.classList.contains('is-nya'), okBubble?.className)
 check('气泡文本与后端返回一致', okBubble?.textContent?.includes('假回答'))
+check('流式回答逐帧拼成完整文本', okBubble?.textContent === REPLY, okBubble?.textContent)
 check('发问后示例问题已退场', document.querySelectorAll('.nya-chip').length === 0)
 
 /*
@@ -402,6 +469,12 @@ check(
   captured?.body?.context?.state,
 )
 check('历史只发最近的若干轮', Array.isArray(captured?.body?.messages) && captured.body.messages.length <= 10)
+/*
+ * 这是"要不要逐字"的唯一开关（服务端默认回一次性 JSON，
+ * 因为所有自动化检查都挂在那个形态上）。它掉了的话，
+ * 表现是"对话变慢了"——没有任何报错，只是首字要等 2.6 秒。
+ */
+check('请求带上了 stream 开关（流式的前提）', captured?.body?.stream === true, captured?.body?.stream)
 
 /*
  * 「上一次快照」必须跟着第二轮一起发出去 —— 这是她能不能说出
@@ -426,6 +499,119 @@ check(
   '上一份快照就是第一次那份状态',
   JSON.stringify(secondPrev) === JSON.stringify(firstRequestState),
   { 第一次: firstRequestState, 第二轮带的: secondPrev },
+)
+
+/* ------------------------------------------------------------------ *
+ * 流式专项
+ *
+ * 这一组盯的是"**什么时候**能看到字"，不是"最终看到了什么"。
+ * 前者是这次改动的全部收益，而它恰恰没有任何报错会提醒你它坏了 ——
+ * 流式退化成一次性，页面照样显示正确答案，只是多等两秒。
+ * ------------------------------------------------------------------ */
+
+/* --- ① 分包：一个 chunk 正好切在某行 JSON 的中间（甚至切在汉字中间） --- */
+
+/*
+ * 为什么要手控节奏而不是"一次吐完整条流"：
+ *   真实网络的 TCP 分包根本不看我们的行边界 —— 一个 chunk 可能正好切在
+ *   某个 JSON 的中间，甚至切在一个汉字的三个字节中间。前端那两处
+ *   （残行留在缓冲区等下一块、`TextDecoder` 带 `{stream:true}` 处理半个汉字）
+ *   **只在分包时才有意义**，而这条路径在本地测试里永远不会自然出现。
+ *
+ * ⚠️ 造这个分包踩了两次坑，都记在这里：
+ *    · 连着 enqueue 两块再 close ⇒ 浏览器**合并交付**，分包没发生；
+ *    · 两块之间隔 `setTimeout(25)` ⇒ 同步探针里确实分了 2 块，
+ *      但走真实前端路径时又被合并了 —— `addBubble()` 里的 `scrollDown()`
+ *      是一次强制重排，几十毫秒就过去了。
+ *   ⇒ 只能手控：测试自己决定"什么时候喂下一块"，不跟浏览器的交付时机赛跑。
+ */
+fakeFetch(async () => controlledStream())
+submitNoWait('测试：分包')
+await sleep(200)
+
+const cutBubble = lastBubble()
+const line1 = frameBytes({ t: '前半句' })
+/*
+ * 🔴 这一刀切在第 11 字节 —— **必须落在"半"字的三个字节中间**。
+ *
+ * 踩过：一开始切在第 12 字节，想着"12 > 6（`{"t":"`）+ 3（前），肯定切在汉字里"。
+ * 结果那一刀**正好落在字符边界上**（`半` = E5 8D 8A，第 10~12 字节），
+ * 于是第一块解码出来是完整的 `{"t":"前半` ——
+ * 前端那句 `TextDecoder(..., {stream:true})` 有没有写、**两种情况表现完全一样**。
+ * 我连着做了两轮反证（故意去掉 stream 选项）都是全绿，差点得出
+ * "这个机制没用"的结论；插桩打出每块字节数才看清是切割点错了。
+ *
+ * ⇒ 下面那条**前提校验**就是为此加的：它保证"这一刀真的切在字符中间"。
+ *    没有它，这条分包断言随时可能退化成"什么都没验"。
+ */
+const CUT = 11
+const firstChunkDecoded = new TextDecoder().decode(line1.slice(0, CUT))
+check(
+  '（前提）分包的第一块真的切在多字节字符中间',
+  firstChunkDecoded.includes('\uFFFD'),
+  JSON.stringify(firstChunkDecoded),
+)
+
+feedRaw(line1.slice(0, CUT))
+await sleep(120)
+check('（分包中途）行没结束时不吐出半个 JSON', cutBubble?.textContent === '', JSON.stringify(cutBubble?.textContent))
+
+feedRaw(line1.slice(CUT))
+feed({ t: '后半句' })
+feed({ done: true, finish: 'stop' })
+endStream()
+await sleep(120)
+check(
+  '跨包切断的 JSON 行能拼回来（含被切成两半的汉字）',
+  cutBubble?.textContent === '前半句后半句',
+  cutBubble?.textContent,
+)
+
+/* --- ② 逐字上屏：手控节奏，确认"第一个字来了就显示" --- */
+fakeFetch(async () => controlledStream())
+submitNoWait('测试：逐字')
+await sleep(200)
+
+const streamBubble = lastBubble()
+check('发问后先出现「···」等待提示', !!document.querySelector('.nya-typing'))
+
+feed({ t: '第一个字' })
+await sleep(80)
+check(
+  '第一个字到达就立刻上屏（不等整段收完）',
+  streamBubble?.textContent === '第一个字',
+  streamBubble?.textContent,
+)
+check('第一个字到达时「···」已撤掉', !document.querySelector('.nya-typing'))
+
+feed({ t: '，后面还有。' })
+feed({ done: true, finish: 'stop' })
+endStream()
+await sleep(120)
+check('后续帧继续追加到同一个气泡', streamBubble?.textContent === '第一个字，后面还有。', streamBubble?.textContent)
+check('流结束后输入框恢复可用', !input.disabled)
+
+/* --- ③ 中途断流：已收到的字必须留着，不能整段作废 --- */
+fakeFetch(async () => ndjsonResponse([{ t: '只说了这么多' }]))
+await submit('测试：中途断流')
+const cutOff = lastBubble()
+check(
+  '中途断流时保留已收到的文字（不补错误气泡）',
+  cutOff?.classList.contains('is-nya') && cutOff?.textContent === '只说了这么多',
+  `${cutOff?.className} / ${cutOff?.textContent}`,
+)
+
+/* --- ④ 一个字都没来：撤掉空壳气泡，改成错误提示 --- */
+fakeFetch(async () => ndjsonResponse([{ error: 'EMPTY_REPLY', message: 'Nya 没说出话来，再问一次试试。' }]))
+await submit('测试：空回复')
+const empty = lastBubble()
+check('流式下空回复显示为错误气泡', empty?.classList.contains('is-err'), empty?.className)
+check('空回复的提示来自服务端的 error 帧', empty?.textContent?.includes('没说出话来'), empty?.textContent)
+check(
+  '空回复不留下空的 Nya 气泡',
+  !Array.from(document.querySelectorAll('.nya-msg')).some(
+    (el) => el.classList.contains('is-nya') && el.textContent === '',
+  ),
 )
 
 /* --- 服务未配置 / 上游出错：必须显示成"出错"，不能装作是正常回答 --- */
