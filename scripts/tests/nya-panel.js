@@ -216,14 +216,30 @@ check('扒窗口的立绘已加载', img.complete && img.naturalWidth > 0, `${im
  * 所以这里改成直接验**文件本身**：WebP 的每一帧都是一个 `ANMF` 块，
  * 数一数就知道这张图是不是真的多帧。确定、便宜、且正好挡住"被换成静态图"
  * 这个真实的回归风险。
+ *
+ * ⚠️ **必须轮询**：立绘是两步加载的（先上静态小图，动图下完再升级过去，
+ *    见 `nya.ts` 的 `setUpgradingSrc` —— 起因是"点开面板十几秒里她还在跑步"）。
+ *    只看一眼的话，慢网上抓到的会是那张静态小图，于是误报"被换成静态图了"。
  */
-const assetUrl = img.currentSrc || img.src
-const assetBytes = new Uint8Array(await realFetch(assetUrl).then((r) => r.arrayBuffer()))
+let assetUrl = ''
+let assetBytes = new Uint8Array(0)
 let anmfCount = 0
-for (let i = 0; i + 3 < assetBytes.length; i++) {
-  if (assetBytes[i] === 0x41 && assetBytes[i + 1] === 0x4e && assetBytes[i + 2] === 0x4d && assetBytes[i + 3] === 0x46) {
-    anmfCount++
+for (let i = 0; i < 60; i++) {
+  assetUrl = img.currentSrc || img.src
+  assetBytes = new Uint8Array(await realFetch(assetUrl).then((r) => r.arrayBuffer()))
+  anmfCount = 0
+  for (let k = 0; k + 3 < assetBytes.length; k++) {
+    if (
+      assetBytes[k] === 0x41 &&
+      assetBytes[k + 1] === 0x4e &&
+      assetBytes[k + 2] === 0x4d &&
+      assetBytes[k + 3] === 0x46
+    ) {
+      anmfCount++
+    }
   }
+  if (anmfCount >= 10) break
+  await sleep(100)
 }
 check(
   '扒窗口的立绘是多帧动图（耳朵甩动烘焙在里面）',

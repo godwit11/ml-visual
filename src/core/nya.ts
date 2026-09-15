@@ -357,6 +357,9 @@ const CHIPS_FALLBACK = ['机器学习到底在干什么？', '我应该从哪一
  * 用原生按钮就自动拿到键盘可达性和 Enter/Space 激活，不用自己补。
  * 拖拽是**附加**在她身上的能力，不是替代品。
  */
+/** 立绘升级的序号，用来作废旧回调（见 setUpgradingSrc） */
+let srcToken = 0
+
 function buildMascot(): HTMLButtonElement {
   const el = document.createElement('button')
   el.type = 'button'
@@ -366,7 +369,7 @@ function buildMascot(): HTMLButtonElement {
 
   const img = document.createElement('img')
   img.className = 'nya-mascot-img'
-  img.src = idleSrc()
+  setUpgradingSrc(img, nyaIdleStill, nyaIdleAnim)
   img.alt = 'Nya'
   /* 首屏就要用上，别等她进入视口才开始下载（她是浮层，永远在视口里） */
   img.decoding = 'async'
@@ -381,26 +384,42 @@ function buildMascot(): HTMLButtonElement {
 }
 
 /**
- * 待机立绘用哪一张。
+ * 🔴 先放**静态小图**，动图下完再升级过去。
+ *
+ * 为什么必须这样（用户实测报上来的）：
+ *   原来是一步到位 `img.src = 动图`。而动图有 300~500 KB，
+ *   网络慢的时候要**十几秒**才下完 —— 这期间浏览器**继续显示上一张图**
+ *   （她待机时那张全身像）。用户看到的就是
+ *   **「面板都开了，她还在原地跑步」**，而且一跑就是十几秒，像坏了。
+ *   实测：首页打开面板后，趴姿那张 384 KB 用了 **10.4 秒**才就绪。
+ *
+ * 换法：静态帧只有几十 KB，一两秒就到位 ⇒ 姿势立刻是对的；
+ * 动图下完再换过来。**静态那张就是动图的第一帧**（同一次导出），
+ * 切过去看不出跳，长宽也一样 ⇒ 不会触发重排。
+ *
+ * ⚠️ 用 token 作废旧回调：连点开关、或者"下到一半又关掉面板"时，
+ *    旧的 onload 不能把图换回上一套姿势。
+ */
+function setUpgradingSrc(el: HTMLImageElement, still: string, anim: string): void {
+  const token = ++srcToken
+  el.src = still
+  /* "减少动态效果"的用户就停在静态图上，别再去下那张大的 */
+  if (prefersStill()) return
+  const pre = new Image()
+  pre.onload = () => {
+    if (token === srcToken && !el.src.endsWith(anim.split('/').pop()!)) el.src = anim
+  }
+  pre.src = anim
+}
+
+/**
+ * 待机／扒窗口各两张图：动图 + 同帧的静态图。
  *
  * ⚠️ 为什么每套都要两张：动图 WebP 是**浏览器层面**在播，CSS 管不了它 ——
  *    `prefers-reduced-motion` 对它完全无效。所以对"减少动态效果"的用户
  *    直接换成同一帧的静态图。这也和背景层的做法一致（那边是只渲染一帧）。
+ * ⚠️ 静态图还兼一个职责：**动图下载期间先顶上去**（见 setUpgradingSrc）。
  */
-function idleSrc(): string {
-  return prefersStill() ? nyaIdleStill : nyaIdleAnim
-}
-
-/**
- * 扒窗口的立绘用哪一张。
- *
- * 动作用的是动图（耳朵会甩），静态那张给"减少动态效果"的用户。
- * 两张的静止帧是同一个画面，切换看不出跳。
- */
-function perchSrc(): string {
-  return prefersStill() ? nyaPerchStill : nyaPerchAnim
-}
-
 function prefersStill(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
@@ -584,7 +603,9 @@ function wireNya(root: HTMLElement, mascot: HTMLButtonElement, panel: HTMLElemen
     if (pose === next) return
     pose = next
     mascot.setAttribute('data-pose', next)
-    img.src = next === 'idle' ? idleSrc() : perchSrc()
+    /* ⚠️ 走"小图→动图"两步，别一步到位 —— 理由见 setUpgradingSrc */
+    if (next === 'idle') setUpgradingSrc(img, nyaIdleStill, nyaIdleAnim)
+    else setUpgradingSrc(img, nyaPerchStill, nyaPerchAnim)
     layout()
   }
 
@@ -596,7 +617,9 @@ function wireNya(root: HTMLElement, mascot: HTMLButtonElement, panel: HTMLElemen
    * 动图 WebP 一旦在 src 里，CSS 是停不掉它的。
    */
   window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', () => {
-    img.src = pose === 'idle' ? idleSrc() : perchSrc()
+    /* 重走一遍两步流程：关掉动画时立刻切到静态图；打开时再去下动图 */
+    if (pose === 'idle') setUpgradingSrc(img, nyaIdleStill, nyaIdleAnim)
+    else setUpgradingSrc(img, nyaPerchStill, nyaPerchAnim)
   })
 
   const savePos = () => {
