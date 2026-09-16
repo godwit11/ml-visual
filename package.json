@@ -53,6 +53,9 @@
     "e2e:nya:mobile": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/linear-regression/ --script scripts/tests/nya-panel.js --size 430,900",
     "check:nya-state": "node scripts/check-nya-state.mjs",
     "check:server": "node scripts/check-server-path.mjs",
+    "check:report": "node scripts/check-report-path.mjs",
+    "e2e:feedback": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/linear-regression/ --script scripts/tests/feedback.js --size 1440,900",
+    "e2e:feedback:mobile": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/linear-regression/ --script scripts/tests/feedback.js --size 430,900",
     "check:vercel": "node scripts/check-vercel-bundle.mjs",
     "verify:release": "npm run typecheck && npm run build && npm run verify:all",
     "nya:prompt": "node scripts/nya-prompt.mjs"

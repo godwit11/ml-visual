@@ -1,0 +1,383 @@
+/**
+ * 「报告问题」贴右边缘的竖标签 + 展开的表单。
+ *
+ * ⚠️ 选择器一律用**类**，不要写成 `.fb > *` 那种 ——
+ *    外层容器一旦用 ID 权重，会压掉子元素自己的 `pointer-events`
+ *    （Nya 那边踩过两次：按钮明明藏起来了却还在拦截点击）。
+ *
+ * 位置：贴右边缘、竖直居中。**不占右下角** —— 那儿是 Nya 的。
+ */
+
+/* --------------------------------------------------------------------------
+ * 容器
+ *
+ * 和 `#nya` 同一个套路：fixed 铺满、不吃点击，只有两个子元素吃。
+ * ------------------------------------------------------------------------ */
+
+.fb {
+  position: fixed;
+  inset: 0;
+  /*
+   * ⚠️ **必须高于 `#nya`（60）。**
+   *
+   * 第一版写的 50，理由是"让会动的那只在上"。这是错的：
+   * Nya 的面板默认宽 380px、落点算下来会占到视口右侧约 x 1014~1394，
+   * 而竖标签在 1372~1406 —— **会被盖住 22px**（超过它宽度的一半）。
+   * 表现是"标签点不到了"，而且只在 Nya 面板打开时才出现。
+   *
+   * 层级反过来之后：
+   *   · 竖标签永远可点（它才 34px 宽，压不到 Nya 身上）；
+   *   · 反馈表单也能盖住 Nya 面板 —— 用户正在填表，本来就该他在上面。
+   * 这条由 `scripts/tests/feedback.js` 里的 `elementFromPoint` 断言盯着。
+   */
+  z-index: 70;
+  pointer-events: none;
+}
+
+.fb-tab,
+.fb-panel {
+  pointer-events: auto;
+}
+
+/* --------------------------------------------------------------------------
+ * 竖标签
+ * ------------------------------------------------------------------------ */
+
+.fb-tab {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  /* 中文竖排。写竖排而不是转 90 度，是为了让字本身也是正的 */
+  writing-mode: vertical-rl;
+  padding: 14px 7px;
+  letter-spacing: 3px;
+  font-size: var(--fs-xs);
+  font-family: inherit;
+  color: var(--text-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: var(--r-md) 0 0 var(--r-md);
+  cursor: pointer;
+  transition: color 0.18s, background 0.18s;
+}
+
+.fb-tab:hover,
+.fb-tab:focus-visible {
+  color: var(--text);
+  background: var(--bg-soft);
+}
+
+/* 面板打开时标签下沉一点，视觉上"被推开了" */
+.fb[data-open='true'] .fb-tab {
+  color: var(--text);
+  background: var(--bg-soft);
+}
+
+/* --------------------------------------------------------------------------
+ * 面板
+ *
+ * 收起用 `visibility: hidden` 而不是只压 `opacity` ——
+ * 后者会让它继续拦点击（Nya 那边踩过的坑）。
+ * ------------------------------------------------------------------------ */
+
+.fb-panel {
+  position: fixed;
+  right: 46px;
+  top: 50%;
+  width: min(360px, calc(100vw - 64px));
+  max-height: min(640px, calc(100vh - 32px));
+  overflow-y: auto;
+  padding: var(--sp-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--nya-shadow);
+  /* 收起态：往右收 10px，像是从标签里抽出来 */
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-50%) translateX(10px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+}
+
+.fb[data-open='true'] .fb-panel {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(-50%) translateX(0);
+}
+
+/* --------------------------------------------------------------------------
+ * 表单
+ * ------------------------------------------------------------------------ */
+
+.fb-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-3);
+}
+
+.fb-title {
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+
+.fb-close {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--r-md);
+}
+
+.fb-close:hover {
+  color: var(--text);
+  background: var(--bg-soft);
+}
+
+.fb-label {
+  display: block;
+  margin: 0 0 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.fb-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--sp-3);
+}
+
+.fb-type {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.fb-type:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+/*
+ * ⚠️ 这里的配色**必须照着项目的既有配对来**，不能凭"看起来差不多"选变量：
+ *    · 实心按钮  = `background: var(--primary)` + `color: var(--primary-text)`
+ *      （`--primary-text` 是"用在 primary 实心底上的字色"：浅色主题下是白，
+ *        深色主题下是近黑。它**不是**一个通用前景色。）
+ *    · 淡底强调  = `background: var(--accent-weak)` + `color: var(--accent)`
+ *    第一版把 `--primary-text` 配到 `--accent-weak` 底上 ⇒ 浅色主题里
+ *    白字落在近白底上，"发送"两个字基本看不见（截图里像块破损的图）。
+ *    这类错误**不会报错、测试也测不到**（它只是"不好看"），只能靠眼睛发现。
+ */
+.fb-type.is-on {
+  color: var(--accent);
+  background: var(--accent-weak);
+  border-color: var(--accent);
+}
+
+.fb-text,
+.fb-mail {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  margin-bottom: var(--sp-3);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-family: inherit;
+}
+
+.fb-text {
+  resize: vertical;
+  min-height: 76px;
+  line-height: 1.6;
+}
+
+.fb-text::placeholder,
+.fb-mail::placeholder {
+  color: var(--text-3);
+}
+
+.fb-text:focus,
+.fb-mail:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/* --------------------------------------------------------------------------
+ * 现场信息（逐项勾选）
+ * ------------------------------------------------------------------------ */
+
+.fb-ctx {
+  margin-bottom: var(--sp-3);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-soft);
+}
+
+.fb-ctx-sum {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.fb-ctx-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.fb-ctx-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+.fb-ctx-item input {
+  margin: 2px 0 0;
+  flex: none;
+}
+
+.fb-ctx-label {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.fb-ctx-key {
+  flex: none;
+  color: var(--text-3);
+}
+
+.fb-ctx-val {
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.fb-ctx-note {
+  margin: 8px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* --------------------------------------------------------------------------
+ * 蜜罐
+ *
+ * ⚠️ 用「移出视口」而不是 `display: none`：有些机器人会跳过不渲染的元素，
+ *    而这个字段的全部意义就是让它们以为自己填了个正常的表单。
+ * ------------------------------------------------------------------------ */
+
+.fb-trap {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* --------------------------------------------------------------------------
+ * 动作区与状态
+ * ------------------------------------------------------------------------ */
+
+.fb-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 主操作按钮用**实心** —— 它是这个面板里唯一要人点的东西，
+   淡底 + 淡字会让它在浅色主题里几乎消失（第一版就是这样）。 */
+.fb-send {
+  padding: 6px 16px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: var(--primary-text);
+  font-size: var(--fs-sm);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.fb-send:hover:not(:disabled) {
+  background: var(--primary-strong);
+  border-color: var(--primary-strong);
+}
+
+.fb-send:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.fb-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.fb-status {
+  margin: 8px 0 0;
+  min-height: 1.2em;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.fb-status.is-ok {
+  color: var(--accent);
+}
+
+.fb-status.is-err {
+  color: var(--warn);
+}
+
+/* --------------------------------------------------------------------------
+ * 移动端
+ *
+ * 竖标签留着（手机上反馈更需要），但整个面板改成从底部弹出 ——
+ * 小屏上靠右浮一个 360px 的卡片会几乎占满屏幕，还不如从下面推上来。
+ * ------------------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  .fb-tab {
+    padding: 11px 5px;
+    letter-spacing: 2px;
+  }
+
+  .fb-panel {
+    right: 8px;
+    left: 8px;
+    top: auto;
+    bottom: 8px;
+    width: auto;
+    max-height: 78vh;
+    transform: translateY(12px);
+  }
+
+  .fb[data-open='true'] .fb-panel {
+    transform: translateY(0);
+  }
+}

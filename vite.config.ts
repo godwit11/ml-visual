@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { existsSync, readdirSync } from 'node:fs'
 import type { IncomingMessage } from 'node:http'
 import { handleChat } from './api/handler.js'
+import { handleReport } from './api/report-handler.js'
 
 const root = dirname(fileURLToPath(import.meta.url))
 
@@ -42,17 +43,23 @@ function demoEntries(): Record<string, string> {
  *   需要的变量见 `.env.example`。生产环境的同名变量填在 Vercel 后台。
  * ------------------------------------------------------------------ */
 
-const NYA_ENV_KEYS = [
+const LOCAL_ENV_KEYS = [
   'MINIMAX_API_KEY',
   'MINIMAX_BASE_URL',
   'MINIMAX_MODEL',
   'NYA_ALLOWED_ORIGINS',
+  /* 「报告问题」那条链路（见 api/report-handler.ts）。
+     RESEND_API_KEY 没配也能跑：服务端会退化成"把报告写进日志"，
+     不会假装发送成功。所以本地开发不必先去注册邮件服务。 */
+  'RESEND_API_KEY',
+  'REPORT_TO',
+  'REPORT_FROM',
 ] as const
 
 /** Vite 默认不会把 .env 的变量塞进 process.env（只暴露 VITE_ 前缀给前端），所以手动加载 */
-function loadNyaEnv(mode: string): void {
+function loadLocalEnv(mode: string): void {
   const env = loadEnv(mode, root, '')
-  for (const key of NYA_ENV_KEYS) {
+  for (const key of LOCAL_ENV_KEYS) {
     if (env[key]) process.env[key] = env[key]
   }
 }
@@ -76,9 +83,19 @@ function toHeaders(req: IncomingMessage): Headers {
 function nyaDevApi(mode: string): Plugin {
   const middleware: Connect.NextHandleFunction = async (req, res, next) => {
     const url = req.url ?? ''
-    if (!url.startsWith('/api/chat')) return next()
 
-    loadNyaEnv(mode)
+    /*
+     * 按**精确路径**分发，不用 `startsWith`。
+     * 否则 `/api/report-handler` 这种内部文件也会被当成 `/api/report` 处理，
+     * 本地和线上的行为就不一致了 —— 线上那条路由返回的是 404 JSON
+     * （它自己导出了兜底 handler，见 api/report-handler.ts 末尾）。
+     */
+    const path = url.split('?')[0]
+    const handler =
+      path === '/api/chat' ? handleChat : path === '/api/report' ? handleReport : null
+    if (!handler) return next()
+
+    loadLocalEnv(mode)
 
     /*
      * 开发时端口可能变（5173 被占时 Vite 会自动换），也可能用 localhost
@@ -99,7 +116,7 @@ function nyaDevApi(mode: string): Plugin {
         headers: toHeaders(req),
         body: await readBody(req),
       })
-      const response = await handleChat(request)
+      const response = await handler(request)
       res.statusCode = response.status
       response.headers.forEach((value, key) => res.setHeader(key, value))
 

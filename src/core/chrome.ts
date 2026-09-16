@@ -1,6 +1,7 @@
 import { initTheme, toggleTheme, currentTheme, onThemeChange } from './theme'
 import { mountBackground } from './background'
 import { mountNya } from './nya'
+import { mountFeedback } from './feedback'
 
 const SUN =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>'
@@ -26,6 +27,15 @@ export function mountChrome(): void {
    * 面板本身不依赖网络：问答失败只影响它自己，页面其余部分照常。
    */
   mountNya()
+  /*
+   * 「报告问题」（贴右边缘的竖标签）。
+   *
+   * 和 Nya 一样是全站共享的浮层，所以也收在这里。
+   * ⚠️ 它的**控制台错误捕获**装在模块顶层、随这个 import 一起执行 ——
+   *    所以 `src/core/feedback.ts` 必须是**静态引入**（不能改成按需 import），
+   *    否则页面一开始那几秒的报错就抓不到了。
+   */
+  mountFeedback()
 }
 
 function wireThemeToggle(): void {

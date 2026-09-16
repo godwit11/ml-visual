@@ -105,6 +105,22 @@ export function provideNyaState(fn: StateProvider): void {
  * @param extra 额外补充的键值（比如页面上没显示的内部量）。键名同样受
  *              服务端 `stateKeys` 白名单约束，不在白名单里的会被丢掉。
  */
+/**
+ * 读一次「当前页面状态」—— 就是 Nya 每次提问时会上报的那一份。
+ *
+ * 这个出口是给**反馈表单**开的：用户报「这个数字不对」时，
+ * 你真正需要的是当时那几个参数值，而不是他的文字描述。
+ * 让两边共用同一个读取器，就不会出现「她看到的」和「报告里带的」对不上
+ * ——那种偏差比缺信息更难查。
+ *
+ * ⚠️ 只有页面调过 `provideNyaStateFromPage()` 才有值。十页都调了；
+ *    万一将来某页忘了，这里返回 undefined，反馈照样能提交（少一份现场）。
+ * ⚠️ 它**每次重新读 DOM**（和 Nya 用的是同一份实现），所以拿到的是点击那一刻的值。
+ */
+export function samplePageState(): Record<string, unknown> | undefined {
+  return stateProvider?.()
+}
+
 export function provideNyaStateFromPage(extra?: () => Record<string, unknown>): void {
   provideNyaState(() => {
     const out: Record<string, unknown> = {}

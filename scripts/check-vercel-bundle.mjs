@@ -62,10 +62,23 @@ const results = []
 const check = (name, ok, extra) => results.push({ name, ok: !!ok, extra })
 
 /* ------------------------------------------------------------------ *
- * ① 入口必须是 api/chat.ts
+ * ① 对外暴露的转发入口必须都在
+ *
+ * ⚠️ **每加一个 `/api` 下的转发入口，都要往这个列表里加一行。**
+ *    漏掉的后果不是"少测一点"，而是那个入口**完全不被这套检查覆盖** ——
+ *    而它恰恰是"本地全绿、线上全崩"最可能发生的地方
+ *    （2026-09-15 的事故就是整个 /api/chat 链路没被验到）。
  * ------------------------------------------------------------------ */
 
-check('入口 api/chat.ts 存在', existsSync(join(API_DIR, 'chat.ts')))
+/** 对外暴露的转发入口，各自对应一个线上网址 */
+const ENTRYPOINTS = ['chat.ts', 'report.ts']
+
+const missingEntries = ENTRYPOINTS.filter((f) => !existsSync(join(API_DIR, f)))
+check(
+  `转发入口都在（${ENTRYPOINTS.join(' / ')}）`,
+  missingEntries.length === 0,
+  missingEntries.length ? `缺：${missingEntries.join(', ')}` : `${ENTRYPOINTS.length} 个`,
+)
 
 /* ------------------------------------------------------------------ *
  * ② 服务端逻辑不许住在 api/ 之外（Vercel 不会碰它们）
@@ -86,7 +99,7 @@ const walk = (dir, depth = 0) => {
     if (!/\.ts$/.test(name.name)) continue
     const rel = p.slice(ROOT.length + 1).replace(/\\/g, '/')
     if (rel.startsWith('api/') || ALLOW.has(rel)) continue
-    if (/handleChat|buildSystemPrompt/.test(readFileSync(p, 'utf8'))) strays.push(rel)
+    if (/handleChat|handleReport|buildSystemPrompt/.test(readFileSync(p, 'utf8'))) strays.push(rel)
   }
 }
 walk(ROOT)
@@ -187,38 +200,49 @@ try {
 if (builtOk) check('esbuild 编译通过', true, `${apiTs.length} 个文件`)
 
 /* ------------------------------------------------------------------ *
- * ⑤ 用 ESM 真加载入口
+ * ⑤ 用 ESM 真加载**每一个**入口
+ *
+ * ⚠️ 这里必须逐个来，不能只挑一个当代表。
+ *    每个入口有自己的一条 import 链 —— 只验 chat 的话，
+ *    report 链上任何一个环节写错（漏扩展名、引用了不存在或被下划线
+ *    前缀忽略的文件）都不会被发现，直到线上那个网址回 500。
  * ------------------------------------------------------------------ */
 
 writeFileSync(join(OUT, 'package.json'), '{"type":"module"}')
 
-const probe = spawnSync(
-  process.execPath,
-  [
-    '-e',
-    `import('./chat.js').then(m => {
-       if (typeof m.default?.fetch !== 'function') {
-         console.log('NO_FETCH'); process.exit(2)
-       }
-       console.log('LOADED'); process.exit(0)
-     }).catch(e => {
-       console.log('FAILED:' + e.code + ':' + (e.url || '')); process.exit(1)
-     })`,
-  ],
-  { cwd: OUT, encoding: 'utf8' },
-)
+for (const entry of ENTRYPOINTS) {
+  /* ① 已经报过缺失了，这里不重复失败 */
+  if (!existsSync(join(OUT, entry.replace(/\.ts$/, '.js')))) continue
+  const js = entry.replace(/\.ts$/, '.js')
 
-const out = (probe.stdout ?? '').trim()
-check(
-  '在 ESM 环境下能加载入口（模拟 Vercel 的 /var/task）',
-  out === 'LOADED',
-  out || (probe.stderr ?? '').split('\n')[0],
-)
-check(
-  '入口导出了 default.fetch（Vercel 约定的形状）',
-  out !== 'NO_FETCH',
-  out === 'NO_FETCH' ? '没有 fetch 方法' : 'ok',
-)
+  const probe = spawnSync(
+    process.execPath,
+    [
+      '-e',
+      `import('./${js}').then(m => {
+         if (typeof m.default?.fetch !== 'function') {
+           console.log('NO_FETCH'); process.exit(2)
+         }
+         console.log('LOADED'); process.exit(0)
+       }).catch(e => {
+         console.log('FAILED:' + e.code + ':' + (e.url || '')); process.exit(1)
+       })`,
+    ],
+    { cwd: OUT, encoding: 'utf8' },
+  )
+
+  const out = (probe.stdout ?? '').trim()
+  check(
+    `在 ESM 环境下能加载 ${entry}（模拟 Vercel 的 /var/task）`,
+    out === 'LOADED',
+    out || (probe.stderr ?? '').split('\n')[0],
+  )
+  check(
+    `${entry} 导出了 default.fetch（Vercel 约定的形状）`,
+    out !== 'NO_FETCH',
+    out === 'NO_FETCH' ? '没有 fetch 方法' : 'ok',
+  )
+}
 
 /* ------------------------------------------------------------------ *
  * 输出
@@ -234,7 +258,7 @@ for (const r of results) {
 }
 console.log('─'.repeat(64))
 if (failed > 0) {
-  console.log(`❌ ${failed} 项没过 —— 现在推上去，线上 /api/chat 大概率是 500`)
+  console.log(`❌ ${failed} 项没过 —— 现在推上去，线上 ${ENTRYPOINTS.map((e) => `/api/${e.replace(/\.ts$/, '')}`).join(' 和 ')} 大概率是 500`)
   console.log('   规则写在 api/chat.ts 顶部的注释里（那里解释了为什么下划线前缀是错的）。')
   process.exit(1)
 }
