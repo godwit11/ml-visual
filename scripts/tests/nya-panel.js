@@ -106,6 +106,23 @@ check('默认面板是关闭的', getComputedStyle(panel).visibility === 'hidden
 
 /* ---------- ③ 拖拽 ---------- */
 
+/*
+ * 🔴 手机上「拖动变成滚页面」的回归防线。
+ *
+ * `touch-action` 曾经只在 `@media (min-width: 641px)` 里设 `none`，
+ * 手机上还是 `manipulation` ⇒ 浏览器把触摸判成滚动、发出 `pointercancel`，
+ * 而她身上的拖拽监听器**照样挂着** ⇒ 表现是「她跟不动 + 页面在滚」
+ * （2026-09-17 用户报的；实测桌面 `none` / 手机 `manipulation`）。
+ *
+ * 桌面端那几条拖动断言**永远测不出**这件事 —— 所以这一条必须两端都跑
+ * （`e2e:nya` 与 `e2e:nya:mobile`），两端都应该是 `none`。
+ */
+check(
+  '她身上接管了触摸手势（否则手机上拖动会被判成滚页面）',
+  getComputedStyle(mascot).touchAction === 'none',
+  getComputedStyle(mascot).touchAction,
+)
+
 /** 造一个和真人一致的指针事件序列 */
 const pointer = (type, x, y) =>
   new PointerEvent(type, {
