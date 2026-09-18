@@ -15,10 +15,12 @@
  * 退出码：脚本返回 { ok: true } 且无 JS 异常 → 0，否则 1。
  */
 import { spawn } from 'node:child_process'
-import { readFileSync, existsSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, existsSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { resolve, join } from 'node:path'
+import { resolve, join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
+import { cleanBrowserProfiles, cleanViteConfigTemp } from './lib/cleanup.mjs'
 
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
 // 端口随机化：固定端口在连续跑多个测试时会撞上"上一个 Edge 还没退干净"的情况，
@@ -135,31 +137,23 @@ async function removeProfile(dir, tries = 25) {
 
 /*
  * 崩溃 / 被 SIGKILL 时来不及清理，所以每次启动兜一遍。
- * 只清超过 6 小时的（正在跑的实例不动），且一次最多清 cap 个，
- * 免得扫上千个目录把测试本身拖慢 —— 要一次性清干净跑 `npm run clean:temp`。
+ *
+ * ⚠️ **强杀在这个脚本里是常态，不是例外** —— 它自己就用 SIGKILL 杀 vite preview，
+ *    而 Vite 的临时配置文件（`vite.config.ts.timestamp-*.mjs`）正是在那儿生成的：
+ *    9 天积了 850 个 / 111MB（2026-09-18 实测）。所以两类残骸一起扫。
+ *
+ * 只清 6 小时以上的（正在跑的实例不动），一次最多 20 个 ——
+ * 免得扫上千个把测试本身拖慢。要一次性清干净跑 `npm run clean:temp`。
  */
-function sweepStaleProfiles(maxAgeMs = 6 * 3600 * 1000, cap = 20) {
-  let removed = 0
-  try {
-    for (const name of readdirSync(tmpdir())) {
-      if (removed >= cap) break
-      if (!name.startsWith('mlv-e2e-')) continue
-      const p = join(tmpdir(), name)
-      try {
-        if (Date.now() - statSync(p).mtimeMs < maxAgeMs) continue
-        rmSync(p, { recursive: true, force: true })
-        removed++
-      } catch {
-        /* 被占用，留给下次 */
-      }
-    }
-  } catch {
-    /* Temp 读不到就算了，不能因此让测试挂掉 */
-  }
-  return removed
+const SWEEP = { maxAgeMs: 6 * 3600 * 1000, cap: 20 }
+const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const sweptTmp = cleanBrowserProfiles({ tmpDir: tmpdir(), ...SWEEP })
+const sweptVite = cleanViteConfigTemp(projectRoot, { ...SWEEP })
+if (sweptTmp.removed || sweptVite.removed) {
+  console.log(
+    `顺手清掉 ${sweptTmp.removed} 个过期浏览器目录、${sweptVite.removed} 个 Vite 临时配置`,
+  )
 }
-const sweptCount = sweepStaleProfiles()
-if (sweptCount) console.log(`顺手清掉 ${sweptCount} 个过期的浏览器数据目录`)
 
 /* ---------- 启动浏览器 ---------- */
 const proc = spawn(
