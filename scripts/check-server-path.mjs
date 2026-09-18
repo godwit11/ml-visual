@@ -94,16 +94,34 @@ globalThis.fetch = async (url, init) => {
   })
 }
 
-const ask = async (question, context) => {
+/*
+ * 每次请求换一个来源 IP。
+ *
+ * 为什么需要：限流是按 IP 计的，而这个脚本一次要发十几二十个请求 ——
+ * 用同一个 IP 的话，脚本自己会把自己的限流撞开，后半段的用例全变成 429，
+ * 报出来的失败还特别像"功能坏了"（2026-09-18 加图片用例时实际踩到：
+ * 「上游非 2xx 时应回 502」那条忽然变成 429，查了半天才发现是自伤）。
+ */
+let ipSeq = 0
+const reqHeaders = () => ({
+  'Content-Type': 'application/json',
+  Origin: 'http://localhost:5173',
+  'x-forwarded-for': `10.9.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`,
+})
+
+const ask = async (question, context, image) => {
   sent = null
+  const bodyIn = { messages: [{ role: 'user', content: question }], context }
+  /* 只有显式传了 image 才带这个字段 —— 好让"不带图"那条老路径保持原样 */
+  if (image !== undefined) bodyIn.image = image
   const res = await handleChat(
     new Request('http://localhost/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Origin: 'http://localhost:5173' },
-      body: JSON.stringify({ messages: [{ role: 'user', content: question }], context }),
+      headers: reqHeaders(),
+      body: JSON.stringify(bodyIn),
     }),
   )
-  return { status: res.status, system: sent?.messages?.[0]?.content ?? '' }
+  return { status: res.status, system: sent?.messages?.[0]?.content ?? '', payload: sent }
 }
 
 /**
@@ -115,7 +133,7 @@ const askStream = async () => {
   const res = await handleChat(
     new Request('http://localhost/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Origin: 'http://localhost:5173' },
+      headers: reqHeaders(),
       body: JSON.stringify({
         messages: [{ role: 'user', content: '这一页怎么样？' }],
         context: { demoId: 'linear-regression' },
@@ -214,6 +232,96 @@ const unknown = await ask('我在哪一页？', { demoId: 'not-a-real-page' })
 check(
   '未知页面不再泄漏原始 id、也不再只推线性回归',
   !unknown.system.includes('not-a-real-page') && !unknown.system.includes('你唯一能看见屏幕状态的地方'),
+)
+
+/* ---------- ③b 图表截图（Nya 的「眼睛」）---------- */
+/*
+ * 为什么这几条必须存在（2026-09-18）：
+ *   给 Nya 装眼睛这件事，最危险的失败方式**不是报错，而是图被某一层静默丢掉** ——
+ *   表现恰好是"她又说我看不到图"，和压根没做这个功能的症状一模一样，肉眼分不出。
+ *   2026-09-14 的「prev 被静默丢掉」就是同一类事故：类型检查过（可选字段）、
+ *   前端断言过（请求体里确实有）、提示词也"看着对"（调试脚本绕过了 handler），
+ *   三层全绿。当时唯一拦得住的就是这个脚本。
+ *   ⇒ 所以这里只在**最底层**断言：看发给上游的 payload 里到底有没有那张图。
+ */
+/*
+ * 用**一张真的截图**（项目自己的 .shots 产物，5KB 出头），不要拿 1×1 占位图糊弄。
+ *
+ * 为什么：服务端对图有**真实的大小约束**（下限 512B、上限 400KB），占位图会撞在
+ * 下限上被丢弃 —— 而它报出来的失败长得**和"图没传过去"一模一样**，2026-09-18
+ * 就在这里白查了一轮。样本不真实，测试就在测别的东西。
+ */
+const REAL_IMG =
+  'data:image/png;base64,' +
+  require('node:fs').readFileSync(resolve(root, '.shots/proto2-mask.png')).toString('base64')
+
+const withImg = await ask(
+  '这张图上画的是什么？',
+  { demoId: 'clustering', state: { '簇数 k': '3' } },
+  { dataUrl: REAL_IMG },
+)
+const lastContent = withImg.payload?.messages?.at(-1)?.content
+check(
+  '截图：带图提问时，最后一条消息的 content 变成数组',
+  Array.isArray(lastContent),
+  `实际是 ${typeof lastContent}`,
+)
+check(
+  '截图：数组里真的有 image_url 块（图没被中途丢掉）',
+  Array.isArray(lastContent) && lastContent.some((p) => p?.type === 'image_url'),
+  JSON.stringify(lastContent)?.slice(0, 140),
+)
+check(
+  '截图：原来的文字问题还在同一个数组里（没被图挤掉）',
+  Array.isArray(lastContent) &&
+    lastContent.some((p) => p?.type === 'text' && p.text === '这张图上画的是什么？'),
+  JSON.stringify(lastContent)?.slice(0, 200),
+)
+check(
+  '截图：提示词改口了 —— 不再声称"看不到任何图形"，且明确提到收到的截图',
+  withImg.system.includes('截图') && !withImg.system.includes('你看不到任何图形'),
+  withImg.system.includes('截图') ? '提到了截图但仍写着看不到图形' : '提示词完全没提截图',
+)
+check(
+  '截图：防幻觉那半没丢 —— 仍然禁止从图里读数字',
+  withImg.system.includes('不要从') || withImg.system.includes('不许从') || withImg.system.includes('别从'),
+  '提示词里找不到"别从图里读数字"这类约束',
+)
+
+/* 不带图时不能变形：老行为必须原样保留（这是十页以外的所有调用方） */
+const noImg = await ask('这一页现在怎么样？', { demoId: 'clustering' })
+check(
+  '截图：不带图时 content 仍是纯字符串（不破坏既有链路）',
+  typeof noImg.payload?.messages?.at(-1)?.content === 'string',
+  typeof noImg.payload?.messages?.at(-1)?.content,
+)
+
+/*
+ * 坏图 / 超大图：**丢掉图，但不能连累这次提问**。
+ * 这是"降级"而不是"报错"—— 图是我们额外送的，它坏了不该让学生问不出问题。
+ */
+const badImg = await ask(
+  '还能问吗？',
+  { demoId: 'clustering' },
+  { dataUrl: 'data:image/png;base64,@@@这里根本不是合法 base64@@@' },
+)
+check('截图：非法 dataUrl 被丢弃，但提问照常成功', badImg.status === 200, badImg.status)
+check(
+  '截图：非法图不会混进上游',
+  typeof badImg.payload?.messages?.at(-1)?.content === 'string',
+  typeof badImg.payload?.messages?.at(-1)?.content,
+)
+
+const huge = await ask(
+  '这张呢？',
+  { demoId: 'clustering' },
+  { dataUrl: 'data:image/jpeg;base64,' + 'A'.repeat(3_000_000) },
+)
+check('截图：超过体积上限的图被丢弃，提问仍成功', huge.status === 200, huge.status)
+check(
+  '截图：超大图不会混进上游（否则会顶爆下游请求体）',
+  typeof huge.payload?.messages?.at(-1)?.content === 'string',
+  typeof huge.payload?.messages?.at(-1)?.content,
 )
 
 /* ---------- ④ 上游参数 ---------- */

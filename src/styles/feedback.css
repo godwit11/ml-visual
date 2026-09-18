@@ -222,6 +222,90 @@
 }
 
 /* --------------------------------------------------------------------------
+ * 附图
+ *
+ * 三个入口（选文件 / 粘贴 / 抓当前图表）都收在 .fb-img-row 里，
+ * 缩略图排在下面 —— 让人一眼看见"已经附了什么、还能再加几张"。
+ * ------------------------------------------------------------------------ */
+
+.fb-img-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.fb-img-btn {
+  padding: 5px 10px;
+  font-size: var(--fs-xs);
+  font-family: inherit;
+  color: var(--text-2);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.fb-img-btn:hover:not(:disabled),
+.fb-img-btn:focus-visible:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* 满了就禁用 —— 这是"最多 3 张"唯一不必读文字就能看见的表达 */
+.fb-img-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.fb-img-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  list-style: none;
+  margin: 0 0 var(--sp-2);
+  padding: 0;
+}
+
+.fb-img-item {
+  position: relative;
+  width: 58px;
+  height: 44px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--bg-soft);
+}
+
+.fb-img-item img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fb-img-del {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  line-height: 1;
+  font-size: 12px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  border: none;
+  cursor: pointer;
+}
+
+.fb-img-note {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* --------------------------------------------------------------------------
  * 现场信息（逐项勾选）
  * ------------------------------------------------------------------------ */
 

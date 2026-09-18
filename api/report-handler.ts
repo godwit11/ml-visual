@@ -29,6 +29,25 @@ const MAX_ITEM_KEY = 40
 const MAX_ITEM_VALUE = 200
 const MAX_ERRORS = 5
 const MAX_ERROR_LEN = 200
+/**
+ * 附件：最多几张、单张多大（这里的"多大"是**解码后的真实字节**）。
+ *
+ * 3 张：一份反馈通常只要"出问题的那一屏"，多给几张是让他能补一张细节图。
+ * 600KB：前端会把图压到长边 1600 / JPEG 0.85（约 200~400KB），这里留一倍余量。
+ *   ⚠️ 请求体还要过 Vercel 的 4.5MB 闸 —— 3 张 × 600KB 经 base64 膨胀后
+ *   约 2.4MB，仍在闸内，但再多就不行了。
+ */
+const MAX_IMAGES = 3
+const MAX_IMAGE_BYTES = 600_000
+/**
+ * 比这还小的一律不可能是真图（正常的压缩截图至少几十 KB）。
+ *
+ * ⚠️ 这个下限和 `api/handler.ts` 里的同名常量是**各留一份**，没有抽公共文件：
+ *    两者的上限本就不同（Nya 看图 400KB / 反馈附件 600KB），真正共用的只有这一条，
+ *    而把它抽出去要牵动 Vercel 的打包形状（见 `api/chat.ts` 顶部那段）。
+ *    改的时候记得两边一起看 —— 抽屉效应在这里不划算。
+ */
+const MIN_IMAGE_BYTES = 512
 
 /**
  * 问题类型白名单。
@@ -174,6 +193,65 @@ function normalizeErrors(raw: unknown): string[] {
     .filter(Boolean)
 }
 
+export interface ReportImage {
+  /** 已消毒的文件名（无路径、无换行、扩展名按**校验过的 mime** 定） */
+  filename: string
+  /** **纯 base64**，不带 `data:` 前缀 —— Resend 的 `content` 要的就是这个形状 */
+  content: string
+}
+
+/**
+ * 校验并归一化前端传来的图片附件。
+ *
+ * ⚠️ 三条硬线，缺一不可：
+ *   1. **mime 白名单**（只放行 png/jpeg）。否则这个字段就是"往邮件里塞任意文件"的通道。
+ *   2. **真实的 base64 形状**（正则钉死字符集与结构），不能只信前端声明的类型 ——
+ *      前端可以撒谎，而这里验的是字节本身。
+ *   3. **文件名消毒**。它是要进邮件头的字符串，带个换行就能注入 Bcc/Subject
+ *      （和上面 `oneLine()` 是同一个道理）。
+ *
+ * ⚠️ 不合格的**逐个丢弃，绝不返回 400**：图是附加品，报告才是主体。
+ *    一份"图丢了但正文照发"的报告，远好过"整份报告发不出去"。
+ */
+function normalizeImages(raw: unknown): ReportImage[] {
+  if (!Array.isArray(raw)) return []
+  const out: ReportImage[] = []
+
+  for (const item of raw.slice(0, MAX_IMAGES)) {
+    if (!item || typeof item !== 'object') continue
+    const dataUrl = (item as { dataUrl?: unknown }).dataUrl
+    const name = (item as { name?: unknown }).name
+    if (typeof dataUrl !== 'string') continue
+
+    const m = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/]+={0,2})$/.exec(dataUrl)
+    if (!m) continue
+    const mime = m[1]
+    const content = m[2]
+
+    /* base64 每 4 字符编码 3 字节 */
+    const bytes = Math.floor((content.length * 3) / 4)
+    if (bytes < MIN_IMAGE_BYTES || bytes > MAX_IMAGE_BYTES) continue
+
+    /*
+     * 扩展名按**校验过的 mime** 定，不沿用前端给的名字里的后缀 ——
+     * 否则可以叫 `x.png` 而实际是别的类型，收件方按后缀打开就中招。
+     */
+    const ext = mime === 'image/png' ? 'png' : 'jpg'
+    const base = oneLine(typeof name === 'string' ? name : '', 60)
+      .replace(/\.(png|jpe?g|gif|webp|svg)$/i, '') /* 前端给的后缀一律不信 */
+      .replace(/[\\/]/g, '_') /* 去掉任何路径痕迹 */
+      .replace(/[^\w.\-\u4e00-\u9fa5]/g, '_') /* 只留安全字符 */
+      .slice(0, 40)
+
+    out.push({
+      filename: `${base || `screenshot-${out.length + 1}`}.${ext}`,
+      content,
+    })
+  }
+
+  return out
+}
+
 /* ------------------------------------------------------------------ *
  * 拼邮件
  * ------------------------------------------------------------------ */
@@ -186,6 +264,8 @@ function buildBody(input: {
   context: { group: string; key: string; value: string }[]
   errors: string[]
   ip: string
+  /** 附了几张图。图本身在附件里，正文只说明数量 */
+  imageCount: number
 }): string {
   const lines: string[] = []
 
@@ -236,6 +316,15 @@ function buildBody(input: {
     lines.push('【控制台报错】')
     input.errors.forEach((e, i) => lines.push(`  ${i + 1}. ${e}`))
     lines.push('')
+  }
+
+  /*
+   * 图在附件里，正文只说数量 —— 不说的话收件人会以为正文就是全部，
+   * 而「他没附图」和「图没传上来」是两件完全不同的事。
+   */
+  if (input.imageCount > 0) {
+    lines.push('')
+    lines.push(`【附图】${input.imageCount} 张，见本邮件附件`)
   }
 
   /* IP 只用于"同一个人刷了多次"时能看出来，不写进正文顶部的显著位置 */
@@ -304,10 +393,12 @@ export async function handleReport(request: Request): Promise<Response> {
   const email = normalizeEmail(src.email)
   const context = normalizeContext(src.context)
   const errors = normalizeErrors(src.errors)
+  /* 图片附件：校验不过的逐张丢掉，**不影响报告本身**（图是附加品，报告才是主体） */
+  const images = normalizeImages(src.images)
   const ip = clientIp(request)
 
   const page = context.find((c) => c.group === '环境' && c.key === '页面')?.value ?? ''
-  const bodyText = buildBody({ kind, text, email, context, errors, ip })
+  const bodyText = buildBody({ kind, text, email, context, errors, ip, imageCount: images.length })
 
   /* --- 没配密钥：**报告不能丢** ---
    * 走服务端日志（Vercel 的 Runtime Logs 能看到全文），
@@ -338,6 +429,15 @@ export async function handleReport(request: Request): Promise<Response> {
         /* 主题里的每一段都过了白名单或 oneLine()，不可能带换行 */
         subject: `[ML 演示站] ${kind}${page ? ` · ${page}` : ''}`,
         text: bodyText,
+        /*
+         * 附件。`content` 要的是**纯 base64**（不带 `data:` 前缀）。
+         * `contentType` 故意不传：让 Resend 从 filename 推断，少一个可能拼错的
+         * 字段名 —— 而 filename 的扩展名已经由 normalizeImages 按**校验过的 mime**
+         * 定死了，不会再出现"名字说 png、其实是别的"。
+         */
+        ...(images.length
+          ? { attachments: images.map((im) => ({ filename: im.filename, content: im.content })) }
+          : {}),
         /* 留了邮箱就设 reply_to —— 你直接点"回复"就能回给他，不用复制地址 */
         ...(email ? { reply_to: email } : {}),
       }),

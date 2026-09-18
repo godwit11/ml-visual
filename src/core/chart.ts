@@ -32,6 +32,23 @@ export interface ChartHandle {
   dispose: () => void
 }
 
+/**
+ * 当前页面上还活着的图表容器。
+ *
+ * 为什么要维护这份名册：Nya 要在学生提问那一刻抓"他正看着的那张图"。
+ * 用 `querySelectorAll('*')` 逐个去找 `__chart` 太笨（页面上几千个元素），
+ * 让 `createChart` 自己登记最省事，也不会漏掉哪个。
+ *
+ * ⚠️ dispose 时必须移除：切换数据集会重建图表，不清掉的话名册里会留下
+ * 已经 dispose 的容器 —— 抓图时拿到的是**上一次的残影**，而且不报错。
+ * 另外只返回还挂在文档里的（换页/重渲染后旧容器会变成游离节点）。
+ */
+const liveCharts = new Set<HTMLElement>()
+
+export function listCharts(): HTMLElement[] {
+  return [...liveCharts].filter((el) => el.isConnected)
+}
+
 /** 创建画布并在主题切换 / 容器尺寸变化时自动刷新。 */
 export function createChart(el: HTMLElement, factory: OptionFactory): ChartHandle {
   const chart = echarts.init(el, undefined, { renderer: 'canvas' })
@@ -40,6 +57,7 @@ export function createChart(el: HTMLElement, factory: OptionFactory): ChartHandl
   const off = onThemeChange(update)
   const ro = new ResizeObserver(() => chart.resize())
   ro.observe(el)
+  liveCharts.add(el)
 
   const handle: ChartHandle = {
     chart,
@@ -47,6 +65,7 @@ export function createChart(el: HTMLElement, factory: OptionFactory): ChartHandl
     dispose: () => {
       off()
       ro.disconnect()
+      liveCharts.delete(el)
       chart.dispose()
     },
   }

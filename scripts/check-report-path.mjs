@@ -151,6 +151,91 @@ check(
 
 /* ---------- ② 没留邮箱时不设 reply_to ---------- */
 
+/* ---------- 图片附件 ---------- */
+/*
+ * 为什么这几条必须有（2026-09-18 加图片上传）：
+ *   图是**唯一一个以二进制形态进邮件的字段**，而且完全来自前端 ——
+ *   校验松一格，就等于把任意文件塞进了发件通道。
+ *
+ *   同时它又必须**坏了不连累报告**：报告才是主体，图是附加品，
+ *   一份"带图失败但正文照发"的报告远好过"整份报告发不出去"。
+ *   这两条方向相反的约束，只有在这一层能同时验到。
+ */
+const IMG_PNG =
+  'data:image/png;base64,' +
+  require('node:fs').readFileSync(resolve(root, '.shots/proto2-mask.png')).toString('base64')
+
+const withImg = await submit({ images: [{ name: 'shot.png', dataUrl: IMG_PNG }] })
+check(
+  '带图 ⇒ Resend 收到 attachments，且只有 1 张',
+  Array.isArray(withImg.mail?.attachments) && withImg.mail.attachments.length === 1,
+  JSON.stringify(withImg.mail?.attachments)?.slice(0, 100),
+)
+check(
+  'attachments 里是**纯 base64**（不带 data: 前缀，带上 Resend 解不出来）',
+  typeof withImg.mail?.attachments?.[0]?.content === 'string' &&
+    !withImg.mail.attachments[0].content.startsWith('data:'),
+  String(withImg.mail?.attachments?.[0]?.content).slice(0, 40),
+)
+check(
+  '正文里说清了附了几张图（否则你收到邮件会以为正文就是全部）',
+  /* ⚠️ 只断言"有这么一段、且带上了数量"，不去咬死具体措辞 ——
+   *    第一版写成 /1 张图/，而实现输出的是「1 张，见本邮件附件」，
+   *    于是断言红了一条本来是对的实现。断言盯语义，别盯文案。 */
+  /【附图】\s*\d+\s*张/.test(String(withImg.mail?.text)),
+  String(withImg.mail?.text).slice(-200),
+)
+
+/* 不带图 ⇒ 老路径一个字节都没变 */
+const noImg = await submit({})
+check(
+  '不带图 ⇒ 压根没有 attachments 这个字段（老路径原样）',
+  noImg.mail?.attachments === undefined,
+  JSON.stringify(noImg.mail?.attachments),
+)
+
+/* 数量上限：多传的直接丢，但不能因此报错 */
+const manyImgs = await submit({
+  images: Array.from({ length: 6 }, (_, i) => ({ name: `s${i}.png`, dataUrl: IMG_PNG })),
+})
+check('最多只带 3 张（多传的直接丢）', manyImgs.mail?.attachments?.length === 3, manyImgs.mail?.attachments?.length)
+
+/* 坏图：全部丢弃，但报告必须照发 */
+const badImgs = await submit({
+  images: [
+    { name: 'a.png', dataUrl: 'data:image/png;base64,@@@这不是合法base64@@@' },
+    /* 非图片 mime —— 绝不能放行，否则可以往邮件里塞任意类型的文件 */
+    { name: 'b.png', dataUrl: 'data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==' },
+    { name: 'c.png', dataUrl: 'javascript:alert(1)' },
+    { name: 'd.png', dataUrl: 'data:image/png;base64,' },
+    { name: 'e.png' },
+    null,
+  ],
+})
+check('非法图全部丢弃，但报告仍然发得出去', badImgs.status === 200 && badImgs.mail !== null, badImgs.status)
+check('非法图一张都没混进附件', badImgs.mail?.attachments === undefined, JSON.stringify(badImgs.mail?.attachments))
+
+/* 超大图：丢弃，报告照发 */
+const hugeImg = await submit({
+  images: [{ name: 'huge.png', dataUrl: 'data:image/png;base64,' + 'A'.repeat(4_000_000) }],
+})
+check(
+  '超大图被丢弃（约 3MB，超过单张上限），报告仍发出',
+  hugeImg.status === 200 && hugeImg.mail?.attachments === undefined,
+  `status=${hugeImg.status} attachments=${JSON.stringify(hugeImg.mail?.attachments)}`,
+)
+
+/* 文件名是**要进邮件头**的字符串，必须消毒 */
+const sneakyName = await submit({
+  images: [{ name: 'a\r\nBcc: evil@example.com\r\n.png', dataUrl: IMG_PNG }],
+})
+const sentName = String(sneakyName.mail?.attachments?.[0]?.filename ?? '')
+check(
+  '文件名被消毒：换行不能进邮件头（否则能注入 Bcc）',
+  !sentName.includes('\n') && !sentName.includes('\r') && sentName.length > 0,
+  JSON.stringify(sentName),
+)
+
 const noMail = await submit({ email: '' })
 check('没留邮箱 ⇒ 不设 reply_to', noMail.mail?.reply_to === undefined, noMail.mail?.reply_to)
 check('没留邮箱 ⇒ 正文里说清楚（免得你以为漏了）', noMail.mail?.text?.includes('他没留'), '')

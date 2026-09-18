@@ -21,13 +21,22 @@
  */
 
 import { siteUrl } from './pager'
-import { samplePageState } from './nya'
+import { samplePageState, captureChartImage } from './nya'
+import { shrinkToJpeg, readAsDataUrl } from './image'
 
 /** 问题类型。第一个是默认值 —— 大多数报告都是「数字看着不对」。 */
 const TYPES = ['数字不对', '文字有错', '图表不动', '页面报错', '其他'] as const
 
 const MAX_ERRORS = 5
 const MAX_TEXT = 1000
+/**
+ * 最多带几张图。
+ *
+ * 服务端也卡了 3 张（`api/report-handler.ts` 的 MAX_IMAGES），这里必须先拦一道 ——
+ * 让用户**当场**看到"最多 3 张"，而不是提交完才发现多的被丢了。
+ * （服务端那道仍然是必须的：前端拦得住手滑，拦不住伪造请求。）
+ */
+const MAX_FILES = 3
 
 /* ------------------------------------------------------------------ *
  * 控制台错误捕获
@@ -204,6 +213,49 @@ export function mountFeedback(): void {
   mail.autocomplete = 'email'
   mail.placeholder = 'you@example.com'
 
+  /* --- 附图 ---
+   *
+   * 三个入口，按"顺手程度"排序：
+   *   ① **Ctrl+V 粘贴** —— 最快。Win+Shift+S 截完直接粘，不用存文件。
+   *   ② **选文件** —— 常规路径。
+   *   ③ **附上当前图表** —— 页面上的图他自己截反而更麻烦（还得对准画布）。
+   *
+   * ⚠️ 这里**没有**"截取整个页面"的按钮，不是漏了：浏览器出于安全没有
+   *    "让网页截自己"的原生能力。要做只能引第三方渲染库，或者让用户
+   *    授权屏幕共享 —— 前者违背"零第三方"的约定，后者为一个反馈入口
+   *    要权限太重。所以整页截图请用系统截图工具，然后粘进来。
+   */
+  const imgLabel = document.createElement('p')
+  imgLabel.className = 'fb-label'
+  imgLabel.textContent = `附图（选填，最多 ${MAX_FILES} 张）`
+
+  const imgRow = document.createElement('div')
+  imgRow.className = 'fb-img-row'
+
+  const fileInput = document.createElement('input')
+  fileInput.type = 'file'
+  fileInput.accept = 'image/*'
+  fileInput.multiple = true
+  fileInput.hidden = true
+
+  const pickBtn = document.createElement('button')
+  pickBtn.type = 'button'
+  pickBtn.className = 'fb-img-btn'
+  pickBtn.textContent = '选择图片'
+
+  const shotBtn = document.createElement('button')
+  shotBtn.type = 'button'
+  shotBtn.className = 'fb-img-btn'
+  shotBtn.textContent = '附上当前图表'
+
+  const imgNote = document.createElement('p')
+  imgNote.className = 'fb-img-note'
+
+  const imgList = document.createElement('ul')
+  imgList.className = 'fb-img-list'
+
+  imgRow.append(pickBtn, shotBtn, fileInput)
+
   /* --- 现场信息：逐项勾选 --- */
   const ctxBox = document.createElement('details')
   ctxBox.className = 'fb-ctx'
@@ -252,6 +304,10 @@ export function mountFeedback(): void {
     textArea,
     mailLabel,
     mail,
+    imgLabel,
+    imgRow,
+    imgList,
+    imgNote,
     ctxBox,
     trap,
     actions,
@@ -314,6 +370,104 @@ export function mountFeedback(): void {
       errorNote.hidden = false
     }
   }
+
+  /* ------------------------------------------------------------------ *
+   * 附图
+   * ------------------------------------------------------------------ */
+
+  /**
+   * 已选的图。存的是**压缩后的 data URL**，不是原始 File ——
+   * 原始截图动辄几 MB，一直攥在内存里到提交为止；压完只剩几十到几百 KB。
+   */
+  const picked: { name: string; dataUrl: string }[] = []
+
+  const renderImages = () => {
+    imgList.replaceChildren()
+    picked.forEach((im, i) => {
+      const li = document.createElement('li')
+      li.className = 'fb-img-item'
+      const thumb = document.createElement('img')
+      thumb.src = im.dataUrl
+      thumb.alt = im.name
+      const del = document.createElement('button')
+      del.type = 'button'
+      del.className = 'fb-img-del'
+      del.setAttribute('aria-label', `移除图片 ${im.name}`)
+      del.textContent = '×'
+      del.addEventListener('click', () => {
+        picked.splice(i, 1)
+        renderImages()
+      })
+      li.append(thumb, del)
+      imgList.append(li)
+    })
+
+    /* 满了就禁用两个入口 —— 让"最多 3 张"当场可见，而不是提交后才发现被丢 */
+    const full = picked.length >= MAX_FILES
+    pickBtn.disabled = full
+    shotBtn.disabled = full
+    imgNote.textContent = picked.length
+      ? `已选 ${picked.length} / ${MAX_FILES} 张`
+      : '截图后可以直接按 Ctrl+V 粘进来'
+  }
+
+  /** 收一张图。压缩失败就静静不收 —— 图是附加品，不该让整个表单报错 */
+  const addImage = async (blob: Blob, name: string) => {
+    if (picked.length >= MAX_FILES) return
+    const raw = await readAsDataUrl(blob)
+    if (!raw) return
+    /*
+     * 1600 —— 故意比 Nya 那边的 900 大：她只要看清"哪一簇更散"，
+     * 而看报告的人要能看清坐标轴上的小字、弹窗里的报错文本。
+     */
+    const shrunk = await shrinkToJpeg(raw, { maxSide: 1600 })
+    if (!shrunk) return
+    picked.push({ name, dataUrl: shrunk })
+    renderImages()
+  }
+
+  pickBtn.addEventListener('click', () => fileInput.click())
+
+  fileInput.addEventListener('change', async () => {
+    for (const f of Array.from(fileInput.files ?? [])) {
+      if (picked.length >= MAX_FILES) break
+      await addImage(f, f.name || 'screenshot.png')
+    }
+    /* 清空：否则"同一个文件再选一次"不会再触发 change */
+    fileInput.value = ''
+  })
+
+  /*
+   * Ctrl+V 粘贴。
+   * ⚠️ 只在面板开着的时候接管 —— 否则用户往页面上别处粘图会被这里抢走。
+   */
+  root.addEventListener('paste', async (e) => {
+    if (root.dataset.open !== 'true') return
+    const files = Array.from(e.clipboardData?.items ?? [])
+      .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
+      .map((it) => it.getAsFile())
+      .filter((f): f is File => !!f)
+    if (!files.length) return
+    e.preventDefault()
+    for (const f of files) {
+      if (picked.length >= MAX_FILES) break
+      await addImage(f, '粘贴的截图.png')
+    }
+  })
+
+  shotBtn.addEventListener('click', async () => {
+    if (picked.length >= MAX_FILES) return
+    const shot = await captureChartImage()
+    if (!shot) {
+      /* 说清楚"为什么没抓到"以及"他自己怎么补" —— 只报一句失败他会不知所措 */
+      imgNote.textContent = '这一页没有可抓的图表。用系统截图工具截屏，再按 Ctrl+V 粘进来。'
+      return
+    }
+    picked.push({ name: '当前图表.png', dataUrl: shot })
+    renderImages()
+  })
+
+  renderImages()
 
   const setOpen = (next: boolean) => {
     root.dataset.open = next ? 'true' : 'false'
@@ -384,6 +538,8 @@ export function mountFeedback(): void {
           email: mail.value.trim(),
           context,
           errors: recentErrors,
+          /* 压缩好的图（data URL）。服务端逐张校验：坏的丢掉，好的转成邮件附件 */
+          images: picked.map((im) => ({ name: im.name, dataUrl: im.dataUrl })),
           /* 蜜罐 + 填写耗时：服务端用它们判"是不是人" */
           trap: trap.value,
           elapsedMs: openedAt ? Date.now() - openedAt : 0,
@@ -396,6 +552,9 @@ export function mountFeedback(): void {
         setStatus('收到了，谢谢你 —— 我会去看。', 'ok')
         textArea.value = ''
         mail.value = ''
+        /* 图也要清掉：不然后面再报一次，会把同一批图重复带上 */
+        picked.length = 0
+        renderImages()
         /* 成功了就别让面板一直占着屏幕 */
         window.setTimeout(() => setOpen(false), 2200)
       } else {

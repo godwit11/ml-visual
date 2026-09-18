@@ -252,6 +252,95 @@ function normalizeContext(raw: unknown): ChatContextPayload {
 }
 
 /* ------------------------------------------------------------------ *
+ * 图表截图（Nya 的「眼睛」）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 单张图的体积上限 —— 这里算的是**解码后的真实字节数**，不是 base64 字符串长度。
+ *
+ * 400KB 是怎么来的：前端把图压到长边 ~900px 的 JPEG 后，实测落在 100~200KB，
+ * 这里留一倍余量。再多就说明前端压缩没生效 —— 与其硬塞给上游（函数请求体
+ * 4.5MB 上限、上游 64MB 上限），不如直接丢掉这一次的图。
+ */
+const MAX_IMAGE_BYTES = 400_000
+/** 比这还小的一律不可能是真图（正常压缩后的截图至少几十 KB） */
+const MIN_IMAGE_BYTES = 512
+
+export interface ChatImage {
+  /** 只可能是 image/png 或 image/jpeg */
+  mime: string
+  /** 原样保留的 data URL，直接可以塞进上游的 image_url */
+  dataUrl: string
+}
+
+/**
+ * 校验并归一化前端传来的一张图。**不合格就返回 null，不抛错。**
+ *
+ * ⚠️ 为什么是"丢弃"而不是"拒绝整个请求"：
+ *    图是我们**额外送**给她的（状态值那条路才是主力）。图坏了、太大、
+ *    格式不对，都不该让学生问不出问题 —— 那等于用一个附加功能毁掉主体功能。
+ *    所以这里只在最外层做静默降级，提问本身照常走完。
+ *
+ * ⚠️ 为什么必须验 base64 的**真实形状**而不是只信 mime 声明：
+ *    前端可以撒谎。一个 `data:image/png;base64,<随便什么>` 如果直接转发，
+ *    轻则上游报错，重则把被夹带的内容塞进上游。这里的正则同时钉死了
+ *    前缀、mime 白名单和 base64 字符集，三者缺一不可。
+ */
+function normalizeImage(raw: unknown): ChatImage | null {
+  if (!raw || typeof raw !== 'object') return null
+  const dataUrl = (raw as { dataUrl?: unknown }).dataUrl
+  if (typeof dataUrl !== 'string') return null
+
+  /* data:<mime>;base64,<payload> —— 只认这一种形状，且 mime 只放行两种 */
+  const m = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/]+={0,2})$/.exec(dataUrl)
+  if (!m) return null
+
+  const payload = m[2]
+  /* base64 每 4 个字符编码 3 字节 */
+  const bytes = Math.floor((payload.length * 3) / 4)
+  if (bytes < MIN_IMAGE_BYTES || bytes > MAX_IMAGE_BYTES) return null
+
+  return { mime: m[1], dataUrl }
+}
+
+/** 上游消息的内容块（OpenAI 兼容格式） */
+type UpstreamContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
+interface UpstreamMessage {
+  role: 'user' | 'assistant'
+  content: string | UpstreamContentPart[]
+}
+
+/**
+ * 把截图**挂到最后一条学生消息上**，而不是新增一条消息。
+ *
+ * 为什么必须挂上去：模型看到的应该是「他提问那一刻的画面」。
+ * 单独作为一条消息，它可能被理解成更早的上下文，甚至被当成学生发来了两张图。
+ *
+ * 为什么它比其他做法都安全：除了最后一条，前面的历史仍然是纯字符串 ——
+ * **不带图的老路径一个字节都没变**，`check-server-path.mjs` 里那条
+ * 「不带图时 content 仍是纯字符串」的断言盯的就是这件事。
+ */
+function attachImage(messages: ChatMessage[], image: ChatImage | null): UpstreamMessage[] {
+  if (!image) return messages
+  const i = messages.length - 1
+  const last = messages[i]
+  if (!last || last.role !== 'user') return messages
+  return [
+    ...messages.slice(0, i),
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: last.content },
+        { type: 'image_url', image_url: { url: image.dataUrl } },
+      ],
+    },
+  ]
+}
+
+/* ------------------------------------------------------------------ *
  * 主入口
  * ------------------------------------------------------------------ */
 
@@ -297,6 +386,12 @@ export async function handleChat(request: Request): Promise<Response> {
   }
   const context = normalizeContext((body as { context?: unknown })?.context)
 
+  /*
+   * 图表截图（可选）。**校验不过就当成"这一轮没图"**，绝不返回 400 ——
+   * 它是附加通道，坏了不该连累提问本身（理由见 normalizeImage 的注释）。
+   */
+  const image = normalizeImage((body as { image?: unknown })?.image)
+
   /**
    * 要不要流式。
    *
@@ -327,7 +422,14 @@ export async function handleChat(request: Request): Promise<Response> {
      * （见 `nya.ts` 的 escalationNotice）。这条规则不能只靠模型自己数，
      * 实测它会数错。
      */
-    messages: [{ role: 'system', content: buildSystemPrompt(context, messages) }, ...messages],
+    /*
+     * 系统提示词必须知道"这一轮有没有图" —— 否则它会照旧写着
+     * 「你看不到任何图形」，于是她**对着图说我看不到**（见 nya.ts 的 sightSection）。
+     */
+    messages: [
+      { role: 'system', content: buildSystemPrompt(context, messages, image !== null) },
+      ...attachImage(messages, image),
+    ],
     max_completion_tokens: MAX_COMPLETION_TOKENS,
     temperature: TEMPERATURE,
     thinking: THINKING,

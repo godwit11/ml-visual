@@ -35,6 +35,8 @@
  */
 
 import { siteUrl } from './pager'
+import { listCharts } from './chart'
+import { shrinkToJpeg } from './image'
 /*
  * 两套立绘：
  *   idle  —— 她还没被点开时用的，在原地跑步的动图（由视频抽帧做成，见
@@ -187,6 +189,84 @@ function labelFor(el: Element): string | undefined {
     if (text) return text
   }
   return el.closest('.ctrl')?.querySelector('label')?.textContent?.trim() || undefined
+}
+
+/* ------------------------------------------------------------------ *
+ * 抓图（Nya 的「眼睛」）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 截图长边上限（px）。**故意比反馈那边的 1600 小得多。**
+ *
+ * 900 是权衡出来的：再小散点就糊成一团（她要用它看"哪一簇更散"），
+ * 再大纯粹烧 token —— 实测 256KB 的图约占 3000 个 prompt token，
+ * 压到 900px / JPEG 之后落在 40~150KB，成本掉到零头。
+ *
+ * 压缩本身走共用的 `shrinkToJpeg`（见 `core/image.ts`，反馈表单也用同一个）。
+ */
+const IMG_MAX_SIDE = 900
+
+/**
+ * 把学生此刻看着的那张图抓成一张 JPEG（data URL）。抓不到就返回 undefined。
+ *
+ * ------------------------------------------------------------------ *
+ * 三个设计决定
+ * ------------------------------------------------------------------ *
+ *
+ * 1. **只抓一张，抓面积最大的那张。**
+ *    一页可能有 1~4 张图（模型评估页有 4 张），但主图总是最大的那个，
+ *    而学生的疑问绝大多数时候冲的就是主图。每张图约 1.5 千 token，
+ *    全带上成本翻几倍，而"你想问的是哪一张"他自己一句话就能说清。
+ *    （服务端提示词里也写明了"你只收到一张，别的图看不到"。）
+ *
+ * 2. **走 canvas 重画一遍，而不是直接把 ECharts 的图发出去。**
+ *    ECharts 只能出 PNG，而 PNG 截图动辄几百 KB；转成 JPEG 体积掉到 1/4。
+ *    ⚠️ 转 JPEG 必须在 canvas 上**先铺一层白底** —— JPEG 没有透明通道，
+ *    不铺的话透明区域会变成**黑块**，她看到的就是一张脏图。
+ *
+ * 3. **任何一步失败都返回 undefined，绝不抛。**
+ *    图是附加品：抓不到就照常提问，学生最多回到"她看不到图"的旧体验，
+ *    而不是"问不出问题"。这条比抓图成功本身重要。
+ *
+ * ⚠️ 每次提问都重新抓一次（不缓存）—— 学生拖完滑杆再问，抓到的必须是
+ *    **变化之后**的那一帧。这和状态读取器"每次重新读 DOM"是同一条原则。
+ */
+export async function captureChartImage(): Promise<string | undefined> {
+  try {
+    /* 太小的容器不是图（可能是还没量出尺寸的占位 div） */
+    const hosts = listCharts().filter((el) => el.clientWidth > 80 && el.clientHeight > 80)
+    if (!hosts.length) return undefined
+
+    const main = hosts.reduce((a, b) =>
+      a.clientWidth * a.clientHeight >= b.clientWidth * b.clientHeight ? a : b,
+    )
+
+    const handle = (main as HTMLElement & { __chart?: { chart: { getDataURL: (o: object) => string } } })
+      .__chart
+    if (!handle) return undefined
+
+    /* 让 ECharts 自己出一张 PNG —— 只有它知道自己的图怎么画的 */
+    const raw = handle.chart.getDataURL({
+      type: 'png',
+      pixelRatio: 1.5,
+      /* 页面是浅色的，而且 JPEG 不接受透明，索性一开始就铺白 */
+      backgroundColor: '#ffffff',
+    })
+
+    /* 缩放 + 转 JPEG 走共用实现（白底那个坑在 core/image.ts 里统一处理） */
+    const out = await shrinkToJpeg(raw, { maxSide: IMG_MAX_SIDE })
+    if (!out) return undefined
+
+    /*
+     * 服务端另有一道大小闸（400KB **真实字节**）。这里先自己拦一次 ——
+     * 前端这道必须**比服务端更紧**，否则会"抓了半天图、却被那边丢掉"，
+     * 白跑一趟请求，而且失败得无声无息。
+     * base64 每 4 字符 3 字节 ⇒ 45 万字符 ≈ 337KB，安全落在 400KB 之内。
+     */
+    return out.length > 450_000 ? undefined : out
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -1159,6 +1239,14 @@ function wireNya(root: HTMLElement, mascot: HTMLButtonElement, panel: HTMLElemen
        */
       const prev = pageId === lastPageId ? lastState : undefined
 
+      /*
+       * 抓一张"他此刻正看着的那张图"，随提问一起发出去。
+       *
+       * 抓图是**附加通道**：抓不到（页面上没有图 / 画布还没画完 / 浏览器
+       * 不给转）就照常提问 —— 不带图的老路径一个字节都没变。
+       */
+      const image = await captureChartImage()
+
       const res = await fetch(siteUrl('api/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1166,6 +1254,8 @@ function wireNya(root: HTMLElement, mascot: HTMLButtonElement, panel: HTMLElemen
           /* 只发最近若干轮：更早的对话对当前问题没什么帮助，却要按量付费 */
           messages: history.slice(-10),
           context: { demoId: pageId, state: now, prev: prev ?? undefined },
+          /* 没抓到图就整个字段不带 —— 服务端据此决定提示词怎么写 */
+          ...(image ? { image: { dataUrl: image } } : {}),
           /*
            * 要逐字输出。服务端按这个开关决定回 NDJSON 流还是回一次性 JSON
            * （见 api/handler.ts）。**它是请求方的选择**，因为自动化检查
