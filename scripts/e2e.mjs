@@ -15,8 +15,9 @@
  * 退出码：脚本返回 { ok: true } 且无 JS 异常 → 0，否则 1。
  */
 import { spawn } from 'node:child_process'
-import { readFileSync, existsSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFileSync, existsSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { resolve, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
@@ -108,6 +109,58 @@ if (wantServe) {
   }
 }
 
+/* ---------- 浏览器用户数据目录 ---------- */
+/*
+ * 为什么必须自己管这个目录：
+ *   Edge 会把上百 M 的配置/缓存写进 --user-data-dir 指向的位置。
+ *   早先这里只拼了个 `mlv-e2e-${Date.now()}` 却**从不删除** ⇒ 每跑一次 e2e
+ *   就在 Temp 里留 47M。2026-09-17 实测攒了 1801 个目录、58.92G，把 C 盘
+ *   吃掉一大块 —— 而 cleanmgr 根本扫不出来（文件数过百万，它超时后直接放弃）。
+ *   现在两头都堵：正常退出时删自己那个；启动时顺手清掉崩溃留下的残骸。
+ */
+const userDataDir = join(tmpdir(), `mlv-e2e-${process.pid}-${Date.now()}`)
+
+/** 删目录；Windows 上进程没死透时文件还被占着会 EPERM，所以轮询重试 */
+async function removeProfile(dir, tries = 25) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      rmSync(dir, { recursive: true, force: true })
+      return true
+    } catch {
+      await delay(200)
+    }
+  }
+  return false
+}
+
+/*
+ * 崩溃 / 被 SIGKILL 时来不及清理，所以每次启动兜一遍。
+ * 只清超过 6 小时的（正在跑的实例不动），且一次最多清 cap 个，
+ * 免得扫上千个目录把测试本身拖慢 —— 要一次性清干净跑 `npm run clean:temp`。
+ */
+function sweepStaleProfiles(maxAgeMs = 6 * 3600 * 1000, cap = 20) {
+  let removed = 0
+  try {
+    for (const name of readdirSync(tmpdir())) {
+      if (removed >= cap) break
+      if (!name.startsWith('mlv-e2e-')) continue
+      const p = join(tmpdir(), name)
+      try {
+        if (Date.now() - statSync(p).mtimeMs < maxAgeMs) continue
+        rmSync(p, { recursive: true, force: true })
+        removed++
+      } catch {
+        /* 被占用，留给下次 */
+      }
+    }
+  } catch {
+    /* Temp 读不到就算了，不能因此让测试挂掉 */
+  }
+  return removed
+}
+const sweptCount = sweepStaleProfiles()
+if (sweptCount) console.log(`顺手清掉 ${sweptCount} 个过期的浏览器数据目录`)
+
 /* ---------- 启动浏览器 ---------- */
 const proc = spawn(
   EDGE,
@@ -117,7 +170,7 @@ const proc = spawn(
     '--no-first-run',
     '--no-default-browser-check',
     `--remote-debugging-port=${PORT}`,
-    '--user-data-dir=' + `C:\\Users\\Redmi\\AppData\\Local\\Temp\\mlv-e2e-${Date.now()}`,
+    '--user-data-dir=' + userDataDir,
     `--window-size=${winSize}`,
     'about:blank',
   ],
@@ -306,5 +359,7 @@ try {
 } finally {
   proc.kill('SIGKILL')
   if (server) server.kill('SIGKILL')
+  // 等 Edge 真的退出再删：Windows 上进程没死透时目录被占着，rmSync 会 EPERM
+  await removeProfile(userDataDir)
   process.exit(exitCode)
 }
