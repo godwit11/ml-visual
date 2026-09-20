@@ -207,65 +207,133 @@ function labelFor(el: Element): string | undefined {
 const IMG_MAX_SIDE = 900
 
 /**
- * 把学生此刻看着的那张图抓成一张 JPEG（data URL）。抓不到就返回 undefined。
+ * 一次最多抓几张。一页最多 4 张（模型评估页），所以这个数**不会截断任何一页**。
+ * 留个上限是为了防止将来某页加出十几张图时，请求体忽然撑爆。
+ */
+const MAX_IMAGES = 4
+
+/**
+ * 所有图加起来的字符数上限（base64 长度）。
+ *
+ * 服务端另有一道"单张 400KB 真实字节"的闸，但**那道闸管不了总数** ——
+ * 4 张各 380KB 加起来会把 Vercel 的 4.5MB 请求体顶穿。所以这里按总量再拦一次。
+ * 90 万字符 ≈ 675KB，四张正常压缩的图（各 40~150KB） comfortably 落在里面。
+ */
+const IMG_TOTAL_CHARS = 900_000
+
+/**
+ * 把学生此刻看着的那些图抓成 JPEG（data URL 数组）。一张都抓不到就返回空数组。
  *
  * ------------------------------------------------------------------ *
- * 三个设计决定
+ * 为什么是"全部"而不是"只抓最大的那张"（2026-09-20 改）
+ * ------------------------------------------------------------------ *
+ * 第一版只抓**面积最大**的那张（理由是"主图总是最大的，成本翻倍不划算"）。
+ * 但用户实测撞上了一个这个策略**根本解不了**的场景：
+ *   他问「左下角那张图是什么」—— 那张图不是主图，她手上没有 ⇒
+ *   她只能绕一圈去描述主图，学生读起来像"她在答非所问"。
+ *
+ * 加了提示词规则（"学生问别的图就直说我只有主图"）也治不了本 ——
+ * 治本的办法是**让她真的有那张图**。成本不是问题（用户明确说"怎么好怎么来"）。
+ *
+ * **主图排第一个**：她的注意力有近因/首位偏好，而且提示词里会点名
+ * 「第一张是主图」。其余按**页面上出现的先后**排，学生说"左下角那张"
+ * 时她能靠顺序对上号。
+ *
+ * ------------------------------------------------------------------ *
+ * 三个设计决定（沿用第一版）
  * ------------------------------------------------------------------ *
  *
- * 1. **只抓一张，抓面积最大的那张。**
- *    一页可能有 1~4 张图（模型评估页有 4 张），但主图总是最大的那个，
- *    而学生的疑问绝大多数时候冲的就是主图。每张图约 1.5 千 token，
- *    全带上成本翻几倍，而"你想问的是哪一张"他自己一句话就能说清。
- *    （服务端提示词里也写明了"你只收到一张，别的图看不到"。）
- *
- * 2. **走 canvas 重画一遍，而不是直接把 ECharts 的图发出去。**
+ * 1. **走 canvas 重画一遍，而不是直接把 ECharts 的图发出去。**
  *    ECharts 只能出 PNG，而 PNG 截图动辄几百 KB；转成 JPEG 体积掉到 1/4。
  *    ⚠️ 转 JPEG 必须在 canvas 上**先铺一层白底** —— JPEG 没有透明通道，
  *    不铺的话透明区域会变成**黑块**，她看到的就是一张脏图。
  *
- * 3. **任何一步失败都返回 undefined，绝不抛。**
+ * 2. **任何一步失败都返回空数组，绝不抛。**
  *    图是附加品：抓不到就照常提问，学生最多回到"她看不到图"的旧体验，
  *    而不是"问不出问题"。这条比抓图成功本身重要。
  *
+ * 3. **每张独立压缩、独立失败。**
+ *    第 3 张压不出来，不该把前两张一起丢掉 —— 所以这里逐张 try，
+ *    不写成"一荣俱荣"的整体 Promise.all 拒绝。
+ *
  * ⚠️ 每次提问都重新抓一次（不缓存）—— 学生拖完滑杆再问，抓到的必须是
  *    **变化之后**的那一帧。这和状态读取器"每次重新读 DOM"是同一条原则。
+ *
+ * ⚠️ 返回的都是**同一时刻**的图。学生连点两次「走 10 步」再提问，
+ *    四张图必须是同一帧 —— 所以这里**先一次性拿完所有 dataURL，再统一压缩**，
+ *    不能"抓一张压一张"（那样第一张和第四张之间隔着几百毫秒的动画）。
  */
-export async function captureChartImage(): Promise<string | undefined> {
+export async function captureChartImages(): Promise<string[]> {
   try {
     /* 太小的容器不是图（可能是还没量出尺寸的占位 div） */
     const hosts = listCharts().filter((el) => el.clientWidth > 80 && el.clientHeight > 80)
-    if (!hosts.length) return undefined
+    if (!hosts.length) return []
 
-    const main = hosts.reduce((a, b) =>
-      a.clientWidth * a.clientHeight >= b.clientWidth * b.clientHeight ? a : b,
+    /* 按文档顺序排（= 学生眼睛从上到下扫到的顺序），然后主图提到最前。
+     * ⚠️ 用 compareDocumentPosition 而不是 getBoundingClientRect().top：
+     *    手机端和桌面端布局不同，但**文档顺序是同一个**，
+     *    而她需要的是一个"跨设备都说得通"的编号。 */
+    const ordered = [...hosts].sort((a, b) =>
+      a === b ? 0 : a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
     )
 
-    const handle = (main as HTMLElement & { __chart?: { chart: { getDataURL: (o: object) => string } } })
-      .__chart
-    if (!handle) return undefined
-
-    /* 让 ECharts 自己出一张 PNG —— 只有它知道自己的图怎么画的 */
-    const raw = handle.chart.getDataURL({
-      type: 'png',
-      pixelRatio: 1.5,
-      /* 页面是浅色的，而且 JPEG 不接受透明，索性一开始就铺白 */
-      backgroundColor: '#ffffff',
-    })
-
-    /* 缩放 + 转 JPEG 走共用实现（白底那个坑在 core/image.ts 里统一处理） */
-    const out = await shrinkToJpeg(raw, { maxSide: IMG_MAX_SIDE })
-    if (!out) return undefined
+    /* 主图 = 面积最大那张（和第一版的判据一致，保持一致才可预测） */
+    const main = ordered.reduce((a, b) =>
+      a.clientWidth * a.clientHeight >= b.clientWidth * b.clientHeight ? a : b,
+    )
+    const picks = [main, ...ordered.filter((el) => el !== main)].slice(0, MAX_IMAGES)
 
     /*
-     * 服务端另有一道大小闸（400KB **真实字节**）。这里先自己拦一次 ——
-     * 前端这道必须**比服务端更紧**，否则会"抓了半天图、却被那边丢掉"，
-     * 白跑一趟请求，而且失败得无声无息。
-     * base64 每 4 字符 3 字节 ⇒ 45 万字符 ≈ 337KB，安全落在 400KB 之内。
+     * ① 先把所有 PNG 一把抓完 —— 保证是同一帧。
+     *    ⚠️ 一张出不来就跳过那张，不影响别的。
      */
-    return out.length > 450_000 ? undefined : out
-  } catch {
-    return undefined
+    const raws: string[] = []
+    for (const el of picks) {
+      const handle = (el as HTMLElement & { __chart?: { chart: { getDataURL: (o: object) => string } } })
+        .__chart
+      if (!handle) continue
+      try {
+        raws.push(
+          handle.chart.getDataURL({
+            type: 'png',
+            pixelRatio: 1.5,
+            /* 页面是浅色的，而且 JPEG 不接受透明，索性一开始就铺白 */
+            backgroundColor: '#ffffff',
+          }),
+        )
+      } catch {
+        /* 这张画布取不出来，跳过 */
+      }
+    }
+
+    /* ② 再逐张压缩 + 转 JPEG。逐张独立，谁失败谁出局。 */
+    const out: string[] = []
+    let total = 0
+    for (const raw of raws) {
+      const jpeg = await shrinkToJpeg(raw, { maxSide: IMG_MAX_SIDE })
+      if (!jpeg) continue
+      /*
+       * 总量闸。**必须留着** —— 底下那个 `check:images` 会验"四张图的
+       * 请求体不超 4.5MB"，把这个删了就等着线上 413。
+       * 注意判据是"加上这张会不会超"，不是"这张单独超没超"。
+       */
+      if (total + jpeg.length > IMG_TOTAL_CHARS) continue
+      total += jpeg.length
+      out.push(jpeg)
+    }
+    return out
+  } catch (err) {
+    /*
+     * ⚠️ 这里**不能安静地吞**。
+     *
+     * 2026-09-20 栽过一次：改成多图之后 `captureChartImages()` 一直返回空数组，
+     * 而**所有测试都是绿的** —— `nya-image.js` 只断言"图发出去没有"，
+     * 抓不到就整个 `images` 字段不发，服务端那边"没图"也是一条合法路径。
+     * 症状只有学生能感觉到（"她怎么还是看不见"）。
+     * ⇒ 至少要在控制台留一声，否则下次还是靠人眼发现。
+     */
+    console.error('[nya] 抓图失败（这一轮她看不到图）：', err)
+    return []
   }
 }
 
@@ -1240,12 +1308,16 @@ function wireNya(root: HTMLElement, mascot: HTMLButtonElement, panel: HTMLElemen
       const prev = pageId === lastPageId ? lastState : undefined
 
       /*
-       * 抓一张"他此刻正看着的那张图"，随提问一起发出去。
+       * 抓"他此刻正看着的那几张图"，随提问一起发出去。
        *
        * 抓图是**附加通道**：抓不到（页面上没有图 / 画布还没画完 / 浏览器
        * 不给转）就照常提问 —— 不带图的老路径一个字节都没变。
+       *
+       * ⚠️ 顺序有意义：**第 1 张一定是主图**（面积最大的那个），
+       *    提示词里就是这么告诉她的。见 captureChartImages 的注释。
        */
-      const image = await captureChartImage()
+      const images = await captureChartImages()
+      const first = images[0]
 
       const res = await fetch(siteUrl('api/chat'), {
         method: 'POST',
@@ -1254,8 +1326,13 @@ function wireNya(root: HTMLElement, mascot: HTMLButtonElement, panel: HTMLElemen
           /* 只发最近若干轮：更早的对话对当前问题没什么帮助，却要按量付费 */
           messages: history.slice(-10),
           context: { demoId: pageId, state: now, prev: prev ?? undefined },
-          /* 没抓到图就整个字段不带 —— 服务端据此决定提示词怎么写 */
-          ...(image ? { image: { dataUrl: image } } : {}),
+          /*
+           * 没抓到图就整个字段不带 —— 服务端据此决定提示词怎么写。
+           * `image` 是单张的老字段，留着是为了**老标签页**（用户浏览器里
+           * 还开着的旧版页面）发来的请求仍能被认识；新代码一律走 `images`。
+           */
+          ...(images.length ? { images } : {}),
+          ...(first ? { image: { dataUrl: first } } : {}),
           /*
            * 要逐字输出。服务端按这个开关决定回 NDJSON 流还是回一次性 JSON
            * （见 api/handler.ts）。**它是请求方的选择**，因为自动化检查

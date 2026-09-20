@@ -21,7 +21,7 @@
  */
 
 import { siteUrl } from './pager'
-import { samplePageState, captureChartImage } from './nya'
+import { samplePageState, captureChartImages } from './nya'
 import { shrinkToJpeg, readAsDataUrl } from './image'
 
 /** 问题类型。第一个是默认值 —— 大多数报告都是「数字看着不对」。 */
@@ -246,8 +246,8 @@ export function mountFeedback(): void {
   const shotBtn = document.createElement('button')
   shotBtn.type = 'button'
   shotBtn.className = 'fb-img-btn'
-  shotBtn.textContent = '附上当前图表'
-
+  /* 「图表」而不是「当前图表」—— 它会把这一页的图**全部**附上（最多 3 张） */
+  shotBtn.textContent = '附上页面图表'
   const imgNote = document.createElement('p')
   imgNote.className = 'fb-img-note'
 
@@ -457,13 +457,24 @@ export function mountFeedback(): void {
 
   shotBtn.addEventListener('click', async () => {
     if (picked.length >= MAX_FILES) return
-    const shot = await captureChartImage()
-    if (!shot) {
+    /*
+     * ⚠️ 抓**全部**图表，不是只抓主图（2026-09-20 改，和 Nya 那边同一轮）。
+     *    报「这个图不对」的同学，指的经常是主图之外的小图 ——
+     *    只抓主图等于把最有用的证据筛掉了。
+     *    1600 那档压缩照旧（报告是要给人看清坐标轴小字的）。
+     */
+    const shots = await captureChartImages()
+    if (!shots.length) {
       /* 说清楚"为什么没抓到"以及"他自己怎么补" —— 只报一句失败他会不知所措 */
       imgNote.textContent = '这一页没有可抓的图表。用系统截图工具截屏，再按 Ctrl+V 粘进来。'
       return
     }
-    picked.push({ name: '当前图表.png', dataUrl: shot })
+    let i = 0
+    for (const dataUrl of shots) {
+      if (picked.length >= MAX_FILES) break
+      i += 1
+      picked.push({ name: i === 1 ? '当前图表.png' : `当前图表${i}.png`, dataUrl })
+    }
     renderImages()
   })
 

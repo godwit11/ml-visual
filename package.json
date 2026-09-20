@@ -58,11 +58,14 @@
     "e2e:feedback:mobile": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/linear-regression/ --script scripts/tests/feedback.js --size 430,900",
     "e2e:nya:image": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/clustering/ --script scripts/tests/nya-image.js --size 1440,900",
     "e2e:feedback:image": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/clustering/ --script scripts/tests/feedback-image.js --size 1440,900",
+    "e2e:feedback:shot": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/logistic-regression/ --script scripts/tests/feedback-shot.js --size 1440,900",
     "nya:image:dump": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/clustering/ --script scripts/tests/nya-image-dump.js --shot .shots/nya-sees.png --viewport --size 900,660",
     "nya:image:live": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/clustering/ --script scripts/tests/nya-image-live.js --size 1440,900",
+    "nya:anchor:live": "node scripts/e2e.mjs --serve --url http://127.0.0.1:4173/demos/clustering/ --script scripts/tests/nya-anchor-live.js --size 402,900",
     "check:vercel": "node scripts/check-vercel-bundle.mjs",
     "verify:release": "npm run typecheck && npm run build && npm run verify:all",
     "nya:prompt": "node scripts/nya-prompt.mjs",
+    "check:orientation": "node scripts/check-orientation.mjs",
     "clean:temp": "node scripts/clean-temp.mjs"
   },
   "dependencies": {

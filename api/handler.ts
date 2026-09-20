@@ -258,13 +258,33 @@ function normalizeContext(raw: unknown): ChatContextPayload {
 /**
  * 单张图的体积上限 —— 这里算的是**解码后的真实字节数**，不是 base64 字符串长度。
  *
- * 400KB 是怎么来的：前端把图压到长边 ~900px 的 JPEG 后，实测落在 100~200KB，
- * 这里留一倍余量。再多就说明前端压缩没生效 —— 与其硬塞给上游（函数请求体
- * 4.5MB 上限、上游 64MB 上限），不如直接丢掉这一次的图。
+ * 400KB 是怎么来的：前端把图压到长边 ~900px 的 JPEG 后，实测落在 40~150KB，
+ * 这里留一倍余量。再多就说明前端压缩没生效 —— 与其硬塞给上游
+ * （函数请求体 4.5MB 上限、上游 64MB 上限），不如直接丢掉这一张。
  */
 const MAX_IMAGE_BYTES = 400_000
 /** 比这还小的一律不可能是真图（正常压缩后的截图至少几十 KB） */
 const MIN_IMAGE_BYTES = 512
+
+/**
+ * 一次最多收几张。
+ *
+ * ⚠️ 必须和 `src/core/nya.ts` 的 `MAX_IMAGES` **一致** ——
+ *    前端按那个数抓，这里按这个数收。前端调大了这里没跟上，
+ *    表现是"最后那张图悄悄没了"，而两边都不报错（正是最坏的那种失败）。
+ *    有一条断言（`check-server-path.mjs`）盯着这两个数相等。
+ */
+const MAX_IMAGES = 4
+
+/**
+ * 所有图加起来的字节上限。
+ *
+ * ⚠️ 为什么单张的闸管不住它：4 张各 380KB 都在单张限内，
+ *    加起来却把 Vercel 函数 4.5MB 的**请求体**顶穿 —— 那是 413，
+ *    整个提问都失败，比"少一张图"严重得多。
+ *    所以单张限和总量限是**两道不同的闸**，缺一不可。
+ */
+const MAX_TOTAL_BYTES = 1_200_000
 
 export interface ChatImage {
   /** 只可能是 image/png 或 image/jpeg */
@@ -303,6 +323,59 @@ function normalizeImage(raw: unknown): ChatImage | null {
   return { mime: m[1], dataUrl }
 }
 
+/**
+ * 归一化**一组**图（Nya 现在一次能收到好几张）。
+ *
+ * 三态，缺一不可：
+ *   ① `images: [dataUrl, ...]`  ← 新格式，前端在发（字符串数组，够用就不要对象）
+ *   ② `image: { dataUrl }`      ← 单张的老格式，**留着**：
+ *                                 用户浏览器里可能还开着一个旧标签页，
+ *                                 它发来的请求不能被当成"没有图"
+ *   ③ 都没有 / 全不合格           ← 空数组（= 这一轮没图）
+ *
+ * ⚠️ **逐张独立**：第 2 张格式不对，不该把第 1、3 张一起丢掉。
+ *    但总量和张数**超了就截断**（不是整批弃用）—— 前面几张通常是学生
+ *    最可能问的（主图排第一），保前弃后比全弃更合理。
+ *
+ * ⚠️ 返回空数组 = "这一轮没图"，服务端据此让提示词走"看不到图形"那一版。
+ *    所以这个函数**绝不能返回 null** —— 否则调用方要写两遍判空。
+ */
+function normalizeImages(raw: unknown): ChatImage[] {
+  const body = (raw ?? {}) as { images?: unknown; image?: unknown }
+
+  const list: unknown[] = []
+  if (Array.isArray(body.images)) list.push(...body.images)
+  else if (typeof body.images === 'string') list.push(body.images) /* 容错：直接给了字符串 */
+  /* 老字段单独收一次。新前端会**两个都发**（images[0] 和 image 同源），
+   * 所以这里要去重 —— 否则同一张图进去两次，白烧一倍 token。 */
+  const legacy = body.image
+
+  const out: ChatImage[] = []
+  const seen = new Set<string>()
+  let total = 0
+
+  const take = (candidate: unknown): void => {
+    if (out.length >= MAX_IMAGES) return
+    const img = normalizeImage(candidate)
+    if (!img) return
+    /* 去重：新前端镜像发的 `image` 和 `images[0]` 是同一张 */
+    if (seen.has(img.dataUrl)) return
+    const bytes = Math.floor((img.dataUrl.length * 3) / 4)
+    if (total + bytes > MAX_TOTAL_BYTES) return
+    seen.add(img.dataUrl)
+    total += bytes
+    out.push(img)
+  }
+
+  for (const item of list) {
+    /* 允许两种写法：裸字符串，或者 { dataUrl }（喂给 normalizeImage 前统一一下） */
+    take(typeof item === 'string' ? { dataUrl: item } : item)
+  }
+  if (legacy) take(legacy)
+
+  return out
+}
+
 /** 上游消息的内容块（OpenAI 兼容格式） */
 type UpstreamContentPart =
   | { type: 'text'; text: string }
@@ -322,9 +395,19 @@ interface UpstreamMessage {
  * 为什么它比其他做法都安全：除了最后一条，前面的历史仍然是纯字符串 ——
  * **不带图的老路径一个字节都没变**，`check-server-path.mjs` 里那条
  * 「不带图时 content 仍是纯字符串」的断言盯的就是这件事。
+ *
+ * ⚠️ 顺序**不能重排**：`images[0]` 是主图（前端这么排、提示词也这么承诺）。
+ *    上游按数组顺序给图，模型对"第一张"的指认才有依据。
+ *
+ * ⚠️ 每张图**不带 caption**。曾经想过给每张图配一行「这是 XX 图」，
+ *    但那样就得把"哪个标题对哪张图"这件事从服务端猜出来 ——
+ *    而服务端只拿得到一串 dataURL，**它不知道图里画的是什么**。
+ *    猜错等于用一条假标签污染她的视觉输入（比没有标签糟得多）。
+ *    替代方案在提示词里：图按文档顺序排，她靠"第几张"和「这一页的图」
+ *    那一节的清单**自己对齐**（清单的条数顺序和前端抓图的顺序一致）。
  */
-function attachImage(messages: ChatMessage[], image: ChatImage | null): UpstreamMessage[] {
-  if (!image) return messages
+function attachImages(messages: ChatMessage[], images: ChatImage[]): UpstreamMessage[] {
+  if (!images.length) return messages
   const i = messages.length - 1
   const last = messages[i]
   if (!last || last.role !== 'user') return messages
@@ -334,7 +417,7 @@ function attachImage(messages: ChatMessage[], image: ChatImage | null): Upstream
       role: 'user',
       content: [
         { type: 'text', text: last.content },
-        { type: 'image_url', image_url: { url: image.dataUrl } },
+        ...images.map((img) => ({ type: 'image_url' as const, image_url: { url: img.dataUrl } })),
       ],
     },
   ]
@@ -389,8 +472,12 @@ export async function handleChat(request: Request): Promise<Response> {
   /*
    * 图表截图（可选）。**校验不过就当成"这一轮没图"**，绝不返回 400 ——
    * 它是附加通道，坏了不该连累提问本身（理由见 normalizeImage 的注释）。
+   *
+   * ⚠️ 传整个 `body` 进去而不是 `body.images`：这个函数要同时认
+   *    `images`（新）和 `image`（老标签页）两种字段，还要去重。
+   *    只传数组的话，兼容那一半就没法做了。
    */
-  const image = normalizeImage((body as { image?: unknown })?.image)
+  const images = normalizeImages(body)
 
   /**
    * 要不要流式。
@@ -423,12 +510,14 @@ export async function handleChat(request: Request): Promise<Response> {
      * 实测它会数错。
      */
     /*
-     * 系统提示词必须知道"这一轮有没有图" —— 否则它会照旧写着
+     * 系统提示词必须知道"这一轮有没有图"、**有几张** —— 否则它会照旧写着
      * 「你看不到任何图形」，于是她**对着图说我看不到**（见 nya.ts 的 sightSection）。
+     * 传张数（而不是布尔）是因为提示词要告诉她"我这一轮收到 N 张，
+     * 按「这一页的图」的顺序排" —— 数字对不上时她能自己发现。
      */
     messages: [
-      { role: 'system', content: buildSystemPrompt(context, messages, image !== null) },
-      ...attachImage(messages, image),
+      { role: 'system', content: buildSystemPrompt(context, messages, images.length) },
+      ...attachImages(messages, images),
     ],
     max_completion_tokens: MAX_COMPLETION_TOKENS,
     temperature: TEMPERATURE,

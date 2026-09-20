@@ -109,16 +109,32 @@ const reqHeaders = () => ({
   'x-forwarded-for': `10.9.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`,
 })
 
-const ask = async (question, context, image) => {
+const ask = async (question, context, images) => {
   sent = null
   const bodyIn = { messages: [{ role: 'user', content: question }], context }
-  /* 只有显式传了 image 才带这个字段 —— 好让"不带图"那条老路径保持原样 */
-  if (image !== undefined) bodyIn.image = image
+  /*
+   * `images` 是**新字段**（数组）。只有显式传了才带 —— 好让"不带图"那条
+   * 老路径保持原样（那条路径是十页以外所有调用方的样子，不能变形）。
+   */
+  if (images !== undefined) bodyIn.images = images
   const res = await handleChat(
     new Request('http://localhost/api/chat', {
       method: 'POST',
       headers: reqHeaders(),
       body: JSON.stringify(bodyIn),
+    }),
+  )
+  return { status: res.status, system: sent?.messages?.[0]?.content ?? '', payload: sent }
+}
+
+/** 老格式（单张 `image` 字段）—— 专门用来验向后兼容，别在新用例里用 */
+const askLegacy = async (question, context, image) => {
+  sent = null
+  const res = await handleChat(
+    new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: reqHeaders(),
+      body: JSON.stringify({ messages: [{ role: 'user', content: question }], context, image }),
     }),
   )
   return { status: res.status, system: sent?.messages?.[0]?.content ?? '', payload: sent }
@@ -255,10 +271,21 @@ const REAL_IMG =
   'data:image/png;base64,' +
   require('node:fs').readFileSync(resolve(root, '.shots/proto2-mask.png')).toString('base64')
 
+/*
+ * 第二张真图。
+ *
+ * ⚠️ 必须是**字节不同**的图：去重是按 dataUrl 内容比的，
+ *    如果两张用同一份，那"两张图都挂上了"这条断言会**因为去重而变红**，
+ *    看起来像 bug，其实是对的 —— 那样就成了「样本不真实，测试在测别的东西」。
+ */
+const SECOND_IMG =
+  'data:image/png;base64,' +
+  require('node:fs').readFileSync(resolve(root, '.shots/proto2-th22-seal2.png')).toString('base64')
+
 const withImg = await ask(
   '这张图上画的是什么？',
   { demoId: 'clustering', state: { '簇数 k': '3' } },
-  { dataUrl: REAL_IMG },
+  [REAL_IMG],
 )
 const lastContent = withImg.payload?.messages?.at(-1)?.content
 check(
@@ -288,6 +315,102 @@ check(
   '提示词里找不到"别从图里读数字"这类约束',
 )
 
+/* ---------- ③c 多张图（2026-09-20 起一次能抓好几张）---------- */
+/*
+ * 🔴 先验一件**跨文件**的事：前端抓几张、后端收几张，必须是同一个数。
+ *
+ * 为什么单列：这两个常量在**两个不同的文件**里（`src/core/nya.ts` 的
+ * `MAX_IMAGES` 和 `api/handler.ts` 的 `MAX_IMAGES`），各自看都很合理。
+ * 前端调大了、后端没跟上 ⇒ **最后那张图悄无声息地没了**，两边都不报错 ——
+ * 正是这一整个 bug 家族里最难查的那种（和 `prev` 被静默丢掉同一性质）。
+ */
+{
+  const feSrc = require('node:fs').readFileSync(resolve(root, 'src/core/nya.ts'), 'utf8')
+  const beSrc = require('node:fs').readFileSync(resolve(root, 'api/handler.ts'), 'utf8')
+  const fe = Number(feSrc.match(/const MAX_IMAGES = (\d+)/)?.[1] ?? NaN)
+  const be = Number(beSrc.match(/const MAX_IMAGES = (\d+)/)?.[1] ?? NaN)
+  check(
+    '多图：前端抓图上限和服务端收图上限是同一个数',
+    Number.isFinite(fe) && fe === be,
+    `前端 MAX_IMAGES=${fe}，服务端 MAX_IMAGES=${be} —— 对不上会让最后一张图悄悄消失`,
+  )
+}
+
+/*
+ * 为什么要单列一组：改成多图之后，「几张」这件事第一次变成了**信息**——
+ * 提示词里会写"你手上有 N 张"，她靠这个数决定敢不敢说"我有你要的那张"。
+ * 一旦总数错了（比如被上限截断、或者新旧两个字段被算了两次），
+ * 她说的张数和手上的对不上 ⇒ 表现还是"指代错位"，和没修一样。
+ */
+const twoImgs = await ask(
+  '左下角那张图是什么？',
+  { demoId: 'logistic-regression' },
+  [REAL_IMG, SECOND_IMG],
+)
+const twoContent = twoImgs.payload?.messages?.at(-1)?.content
+const imgParts = Array.isArray(twoContent) ? twoContent.filter((p) => p?.type === 'image_url') : []
+check('多图：两张图都挂上了', imgParts.length === 2, `实际 ${imgParts.length} 张`)
+check(
+  '多图：顺序没被重排（第 1 张仍是主图那张）',
+  imgParts[0]?.image_url?.url === REAL_IMG,
+  '第一张不是主图 —— 她按"第 1 张是主图"认，顺序错了会张冠李戴',
+)
+check(
+  '多图：提示词里报了正确的张数（她靠这个数决定敢不敢认领）',
+  twoImgs.system.includes('2 张'),
+  '提示词里没说"2 张" —— 她不知道手上有几张，又会绕着主图说',
+)
+
+/*
+ * 张数上限：给 9 张**互不相同**的图，最多只该留下 MAX_IMAGES(=4) 张。
+ *
+ * ⚠️ 这 9 张必须是**不同的字节**。第一版图省事，把两张图交替塞了 9 遍 ——
+ *    结果去重先跑，只剩下 2 张，而断言期望 4 ⇒ **报了一个假失败**，
+ *    看起来像"截断没生效"。去重和截断是两条独立的规则，
+ *    要分别验：这一条验截断，所以输入必须先满足"不去重"。
+ */
+const distinct = (n) =>
+  Array.from({ length: n }, (_, i) =>
+    'data:image/png;base64,' +
+    Buffer.from(
+      require('node:fs').readFileSync(resolve(root, '.shots/proto2-mask.png')).toString('base64') +
+        /* 尾部补几个字节的差异 —— 只要整体还是合法 base64 且体积仍在区间内 */
+        Buffer.from(`pad${i}`).toString('base64'),
+    ).toString('base64'),
+  )
+const manyImgs = await ask('这页的图都看看？', { demoId: 'model-evaluation' }, distinct(9))
+const manyParts = Array.isArray(manyImgs.payload?.messages?.at(-1)?.content)
+  ? manyImgs.payload.messages.at(-1).content.filter((p) => p?.type === 'image_url')
+  : []
+check('多图：超过上限的张数被截断（不是整批丢掉）', manyParts.length === 4, `实际留了 ${manyParts.length} 张`)
+
+/* 去重单独验：两张同样的图进去，只能算一张 */
+const dupImgs = await ask('两张一样的？', { demoId: 'clustering' }, [REAL_IMG, REAL_IMG, REAL_IMG])
+const dupParts = Array.isArray(dupImgs.payload?.messages?.at(-1)?.content)
+  ? dupImgs.payload.messages.at(-1).content.filter((p) => p?.type === 'image_url')
+  : []
+check(
+  '多图：重复的图会去重（同一张重复发不该白烧一倍 token）',
+  dupParts.length === 1,
+  `3 张同样的图，去重后应剩 1 张，实际 ${dupParts.length}`,
+)
+
+/* 老字段（单个 image）必须仍然认 —— 用户浏览器里可能开着旧标签页 */
+const legacy = await askLegacy('这张图呢？', { demoId: 'clustering' }, { dataUrl: REAL_IMG })
+const legacyContent = legacy.payload?.messages?.at(-1)?.content
+check(
+  '多图：老的单个 image 字段仍然被认（旧标签页不会突然"没有图"）',
+  Array.isArray(legacyContent) && legacyContent.some((p) => p?.type === 'image_url'),
+  `实际是 ${typeof legacyContent}`,
+)
+
+/* 🎯 新旧两个字段同时发同一张图 —— 绝不能变成两张（新前端就是这么发的） */
+const bothFields = await ask('这张图呢？', { demoId: 'clustering' }, [REAL_IMG])
+const bothParts = Array.isArray(bothFields.payload?.messages?.at(-1)?.content)
+  ? bothFields.payload.messages.at(-1).content.filter((p) => p?.type === 'image_url')
+  : []
+check('多图：images 与 image 同源时不会重复计数', bothParts.length === 1, `实际 ${bothParts.length} 张`)
+
 /* 不带图时不能变形：老行为必须原样保留（这是十页以外的所有调用方） */
 const noImg = await ask('这一页现在怎么样？', { demoId: 'clustering' })
 check(
@@ -300,11 +423,9 @@ check(
  * 坏图 / 超大图：**丢掉图，但不能连累这次提问**。
  * 这是"降级"而不是"报错"—— 图是我们额外送的，它坏了不该让学生问不出问题。
  */
-const badImg = await ask(
-  '还能问吗？',
-  { demoId: 'clustering' },
-  { dataUrl: 'data:image/png;base64,@@@这里根本不是合法 base64@@@' },
-)
+const badImg = await ask('还能问吗？', { demoId: 'clustering' }, [
+  'data:image/png;base64,@@@这里根本不是合法 base64@@@',
+])
 check('截图：非法 dataUrl 被丢弃，但提问照常成功', badImg.status === 200, badImg.status)
 check(
   '截图：非法图不会混进上游',
@@ -312,16 +433,54 @@ check(
   typeof badImg.payload?.messages?.at(-1)?.content,
 )
 
-const huge = await ask(
-  '这张呢？',
-  { demoId: 'clustering' },
-  { dataUrl: 'data:image/jpeg;base64,' + 'A'.repeat(3_000_000) },
-)
+const huge = await ask('这张呢？', { demoId: 'clustering' }, [
+  'data:image/jpeg;base64,' + 'A'.repeat(3_000_000),
+])
 check('截图：超过体积上限的图被丢弃，提问仍成功', huge.status === 200, huge.status)
 check(
   '截图：超大图不会混进上游（否则会顶爆下游请求体）',
   typeof huge.payload?.messages?.at(-1)?.content === 'string',
   typeof huge.payload?.messages?.at(-1)?.content,
+)
+
+/*
+ * 🔴 混搭：**一张好图 + 一张坏图** ⇒ 好图必须活下来。
+ * 这是多图引入的新失败模式：写成"整批校验、一张不合格全弃"的话，
+ * 学生传了张截图就发不出另一张正确的图，而且**不报错**。
+ */
+const mixed = await ask('两张都看看？', { demoId: 'clustering' }, [
+  REAL_IMG,
+  'data:image/png;base64,不是合法的',
+])
+const mixedParts = Array.isArray(mixed.payload?.messages?.at(-1)?.content)
+  ? mixed.payload.messages.at(-1).content.filter((p) => p?.type === 'image_url')
+  : []
+check(
+  '多图：一张好一张坏 ⇒ 好图仍然送达（逐张独立，不整批弃用）',
+  mixedParts.length === 1 && mixedParts[0]?.image_url?.url === REAL_IMG,
+  `实际 ${mixedParts.length} 张`,
+)
+
+/*
+ * 🔴 总量闸：4 张各在单张上限内、加起来超总量 ⇒ 必须截断，不能全塞给上游。
+ * 这是单张闸**管不到**的那一类 —— 4×380KB 加起来会把 Vercel 请求体顶穿。
+ */
+const nearLimit = `data:image/jpeg;base64,${'A'.repeat(500_000)}`
+const bulk = await ask('全看看', { demoId: 'model-evaluation' }, [
+  nearLimit,
+  nearLimit,
+  nearLimit,
+  nearLimit,
+  nearLimit,
+])
+const bulkParts = Array.isArray(bulk.payload?.messages?.at(-1)?.content)
+  ? bulk.payload.messages.at(-1).content.filter((p) => p?.type === 'image_url')
+  : []
+const bulkBytes = bulkParts.reduce((n, p) => n + Math.floor((p.image_url.url.length * 3) / 4), 0)
+check(
+  '多图：总量超过请求体预算时被截断（单张闸管不到这一层）',
+  bulkParts.length < 5 && bulkBytes <= 1_200_000,
+  `留了 ${bulkParts.length} 张、共 ${Math.round(bulkBytes / 1024)}KB`,
 )
 
 /* ---------- ④ 上游参数 ---------- */

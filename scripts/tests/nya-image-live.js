@@ -24,7 +24,6 @@ const QUESTION = '这张图里右上角那团橙色的点，看起来聚得紧�
 input.value = QUESTION
 input.dispatchEvent(new Event('input', { bubbles: true }))
 form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
-
 /* 等**助教**的回答稳定下来。
  *
  * ⚠️ 必须按角色取（`.is-nya`），不能取"最后一条 .nya-msg" ——
@@ -66,6 +65,10 @@ return {
   /* 这几个词说明她真的在看图（而不是在背概念） */
   提到方位: /右上|右上方|上边|那一团|那团/.test(answer),
   提到疏密: /散|紧|密|集中|铺开|聚/.test(answer),
+  /* **正向指标（2026-09-20 加的）**：她有没有**报出面板标题原文**。
+   * 锚点改成"标题原文"之后，如果她认出了问的那张图，第一句应该会带上
+   * 页面上印着的名字（"聚类结果"）。带上 ⇒ 学生能逐字核对，改对了。 */
+  报出标题原文: /聚类结果/.test(answer),
   /* **反向指标**：出现带两位小数的数字 ⇒ 提示词的分工规则没生效（她在从图上读数） */
   疑似读数字: /\d+\.\d{2,}/.test(answer),
 }
